@@ -1,15 +1,24 @@
-import cv2
-import pandas as pd
-import numpy as np
-import os
-import tempfile
-from paddleocr import PaddleOCR
+try:
+    import cv2
+    import pandas as pd
+    import numpy as np
+    import os
+    import tempfile
+    from paddlex import create_pipeline
+except ImportError as e:
+    import sys
+    print(f"\n[ERROR] Missing dependency: {e}")
+    print(f"[ERROR] Current Python: {sys.version}")
+    print("[ERROR] Please ensure you are using the correct virtual environment.")
+    print("[ERROR] Run: source venv/bin/activate")
+    print("[ERROR] Or select 'venv' as your interpreter in your IDE.\n")
+    sys.exit(1)
 
 # Disable oneDNN to fix Windows crash
 os.environ["FLAGS_use_mkldnn"] = "0"
 
-# Initialize PaddleOCR once (expensive to load)
-ocr = PaddleOCR(use_angle_cls=True, lang='en', enable_mkldnn=False)
+# Initialize PaddleX OCR pipeline once (expensive to load)
+ocr = create_pipeline(pipeline="OCR")
 
 
 # ─── STEP 1: PREPROCESS IMAGE ───────────────────────────────────────────────────
@@ -81,6 +90,7 @@ def ocr_full_image(image_path):
     results = []
 
     try:
+        # Use the predict method (relying on paddlex defaults)
         predictions = list(ocr.predict(image_path))
         for pred in predictions:
             # OCRResult is dict-like with rec_texts and dt_polys

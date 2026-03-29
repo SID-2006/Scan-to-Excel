@@ -4,8 +4,8 @@ import { Image, Type, CheckSquare, FileSpreadsheet, Check } from 'lucide-react';
 
 const steps = [
   { id: 1, title: 'Image Processing', icon: Image, description: 'Enhancing and deskewing' },
-  { id: 2, title: 'OCR Extraction', icon: Type, description: 'Reading text content' },
-  { id: 3, title: 'Table Detection', icon: CheckSquare, description: 'Identifying structure' },
+  { id: 2, title: 'Table Detection', icon: CheckSquare, description: 'Identifying structure' },
+  { id: 3, title: 'OCR Extraction', icon: Type, description: 'Reading text content' },
   { id: 4, title: 'Excel Generation', icon: FileSpreadsheet, description: 'Formatting data' },
 ];
 
