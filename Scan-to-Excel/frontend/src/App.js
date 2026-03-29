@@ -34,8 +34,8 @@ function App() {
     setCurrentStep(1); // Image Processing
     
     // Simulate initial steps for visual feedback
-    setTimeout(() => setCurrentStep(2), 1000); // OCR
-    setTimeout(() => setCurrentStep(3), 2000); // Table Detection
+    setTimeout(() => setCurrentStep(2), 1000); // Table Detection
+    setTimeout(() => setCurrentStep(3), 2000); // OCR extraction
     
     const formData = new FormData();
     formData.append('file', selectedFile);
