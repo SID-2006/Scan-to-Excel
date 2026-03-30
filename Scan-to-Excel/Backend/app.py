@@ -1,7 +1,8 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import os
-from ocr_engine import process_image, save_to_excel
+from werkzeug.utils import secure_filename
+from ocr_engine import process_image, process_pdf, save_to_excel
 
 app = Flask(__name__)
 CORS(app)
@@ -22,16 +23,33 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 
 @app.route("/upload", methods=["POST"])
-def upload_image():
+def upload_file():
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
 
     file = request.files["file"]
-    image_path = os.path.join(UPLOAD_FOLDER, file.filename)
-    file.save(image_path)
+    if not file or not file.filename:
+        return jsonify({"error": "Invalid file"}), 400
+
+    filename = secure_filename(file.filename)
+    if not filename:
+        return jsonify({"error": "Invalid filename"}), 400
+
+    file_path = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(file_path)
 
     try:
-        table = process_image(image_path)
+        extension = os.path.splitext(filename)[1].lower()
+        if extension == ".pdf":
+            requested_pages = request.form.get("max_pages", "2")
+            try:
+                max_pages = int(requested_pages)
+            except ValueError:
+                max_pages = 2
+            max_pages = max(1, min(max_pages, 5))
+            table = process_pdf(file_path, max_pages=max_pages, zoom=1.35)
+        else:
+            table = process_image(file_path)
         return jsonify({"data": table})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -62,4 +80,4 @@ def test_upload():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=False, threaded=True, port=5001)

@@ -7,8 +7,8 @@ import DocumentPreview from './components/DocumentPreview';
 import ExportSection from './components/ExportSection';
 import './App.css';
 
-// Using http://127.0.0.1:5000 as default Flask backend port
-const API_BASE_URL = 'http://127.0.0.1:5000';
+// Port 5000 is occupied by AirTunes on some macOS setups, so backend defaults to 5001.
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://127.0.0.1:5001';
 
 function App() {
   const [file, setFile] = useState(null);
