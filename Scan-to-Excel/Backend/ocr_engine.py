@@ -4,6 +4,7 @@ try:
     import numpy as np
     import os
     import tempfile
+    import re
     from paddlex import create_pipeline
 except ImportError as e:
     import sys
@@ -232,6 +233,363 @@ def normalize_columns(table):
     return normalized
 
 
+def looks_like_daily_report(table):
+    """Detect the recurring daily centre report layout."""
+    flattened = " ".join(cell.lower() for row in table for cell in row if cell).strip()
+    signals = [
+        "thought of the day",
+        "daily checklist",
+        "class details",
+        "centre",
+        "volunteer",
+    ]
+    return sum(1 for signal in signals if signal in flattened) >= 3
+
+
+def normalize_whitespace(text):
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def extract_first_match(text, patterns):
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return normalize_whitespace(match.group(1))
+    return ""
+
+
+def infer_day_from_date(date_text):
+    try:
+        parsed = pd.to_datetime(date_text, dayfirst=True, errors="coerce")
+        if pd.isna(parsed):
+            return ""
+        return parsed.day_name()[:3].upper()
+    except Exception:
+        return ""
+
+
+def normalize_yes_no_token(token):
+    cleaned = normalize_whitespace(token).upper().strip(":;,. ")
+    yes_aliases = {"Y", "YES", "V", "T", "I", "L", "1", "7", ">", "S", "4"}
+    no_aliases = {"N", "NO", "X"}
+    if cleaned in yes_aliases:
+        return "Y"
+    if cleaned in no_aliases:
+        return "N"
+    return cleaned
+
+
+def extract_yes_no_from_text(text):
+    match = re.search(r"[:\-\s]([YyNnVvXx><7])\s*$", normalize_whitespace(text))
+    if match:
+        return normalize_yes_no_token(match.group(1))
+
+    tokens = re.findall(r"\b([YyNnVvXx])\b", text or "")
+    if tokens:
+        return normalize_yes_no_token(tokens[-1])
+
+    return ""
+
+
+def clean_time_token(value):
+    token = normalize_whitespace(value).replace(".", ":")
+    token = re.sub(r"[^0-9:]", "", token)
+    match = re.search(r"(\d{1,2}):?(\d{2})", token)
+    if not match:
+        return ""
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+    if hour > 23 or minute > 59:
+        return ""
+    return f"{hour}:{minute:02d}"
+
+
+def clean_class_token(value):
+    token = normalize_whitespace(value)
+    if not token:
+        return ""
+    ordinal_match = re.search(r"(\d{1,3})(st|nd|rd|th)?", token, flags=re.IGNORECASE)
+    if ordinal_match:
+        number = ordinal_match.group(1)
+        suffix = (ordinal_match.group(2) or "th").lower()
+        if number.endswith("1") and number != "11":
+            suffix = "st"
+        elif number.endswith("2") and number != "12":
+            suffix = "nd"
+        elif number.endswith("3") and number != "13":
+            suffix = "rd"
+        elif suffix not in {"st", "nd", "rd"}:
+            suffix = "th"
+        return f"{number}{suffix}"
+    return token
+
+
+def clean_numeric_token(value):
+    digits = re.findall(r"\d+", value or "")
+    return digits[0] if digits else ""
+
+
+def clean_name_token(value):
+    token = normalize_whitespace(value)
+    token = re.sub(r"[^A-Za-z\s.]", "", token)
+    return normalize_whitespace(token)
+
+
+def clean_subject_token(value):
+    token = normalize_whitespace(value)
+    token = re.sub(r"[^A-Za-z\s]", "", token)
+    return normalize_whitespace(token).title()
+
+
+def extract_checklist_value(section_text, keywords):
+    lines = [normalize_whitespace(line) for line in section_text.splitlines() if normalize_whitespace(line)]
+
+    for line in lines:
+        lowered = line.lower()
+        if all(keyword in lowered for keyword in keywords):
+            direct = re.search(r"[:\-]\s*([A-Za-z0-9>]+)\s*$", line)
+            if direct:
+                return normalize_yes_no_token(direct.group(1))
+
+    inline_pattern = r"{}[^A-Za-z0-9]{{0,8}}([A-Za-z0-9>])".format(r".*".join(keywords))
+    inline = re.search(inline_pattern, section_text, flags=re.IGNORECASE | re.DOTALL)
+    if inline:
+        return normalize_yes_no_token(inline.group(1))
+
+    return ""
+
+
+def extract_checklist_values_from_rows(table):
+    checklist_markers = [
+        ("Centre started on time", ["centre", "start"]),
+        ("Students wore I-Cards", ["students", "wore"]),
+        ("Volunteers wore I-Cards", ["volunteer", "wore"]),
+        ("Footwears placed properly", ["footwear"]),
+        ("Prayer Conducted", ["prayer", "conduct"]),
+        ("Explained the Thought", ["explained", "thought"]),
+        ("Physical Activity", ["physical", "activity"]),
+        ("Student's Attendance taken", ["student", "attendance"]),
+        ("Closing prayer conducted", ["closing", "prayer"]),
+        ("Centre closed on Time", ["centre", "closed"]),
+    ]
+
+    values_by_label = {label: "" for label, _ in checklist_markers}
+    for row in table:
+        row_cells = [normalize_whitespace(cell) for cell in row if normalize_whitespace(cell)]
+        if not row_cells:
+            continue
+        row_text = " ".join(row_cells)
+        lowered = row_text.lower()
+
+        for label, keywords in checklist_markers:
+            if all(keyword in lowered for keyword in keywords):
+                guess = extract_yes_no_from_text(row_text)
+                if guess:
+                    values_by_label[label] = guess
+
+        # Some scans merge 2-3 checklist items in one cell; extract inline.
+        for label, keywords in checklist_markers:
+            if values_by_label[label]:
+                continue
+            inline_pattern = r"{}[^A-Za-z0-9]{{0,20}}([YyNnVvXx><7])".format(r".*".join(keywords))
+            inline_match = re.search(inline_pattern, row_text, flags=re.IGNORECASE)
+            if inline_match:
+                values_by_label[label] = normalize_yes_no_token(inline_match.group(1))
+
+    return [f"{label}: {values_by_label[label]}".rstrip() for label, _ in checklist_markers]
+
+
+def parse_class_row_from_text(row_text):
+    row_text = normalize_whitespace(row_text)
+    if not row_text:
+        return None
+
+    serial_match = re.match(r"^(\d{1,2})\b", row_text)
+    if not serial_match:
+        return None
+
+    serial = serial_match.group(1)
+    text_after_serial = normalize_whitespace(row_text[len(serial):])
+
+    time_matches = re.findall(r"\b(\d{1,2}[:.]\d{2})\b", text_after_serial)
+    if len(time_matches) < 2:
+        return None
+
+    in_time = clean_time_token(time_matches[0])
+    out_time = clean_time_token(time_matches[1])
+    if not in_time or not out_time:
+        return None
+
+    first_time_index = text_after_serial.find(time_matches[0])
+    second_time_index = text_after_serial.find(time_matches[1], first_time_index + len(time_matches[0]))
+
+    teacher = clean_name_token(text_after_serial[:first_time_index])
+    tail = normalize_whitespace(text_after_serial[second_time_index + len(time_matches[1]):])
+    tail_tokens = tail.split()
+
+    class_taught = ""
+    no_of_students = ""
+    subject = ""
+    activity = ""
+    homework = ""
+
+    if tail_tokens:
+        class_taught = clean_class_token(tail_tokens[0])
+    if len(tail_tokens) > 1:
+        no_of_students = clean_numeric_token(tail_tokens[1])
+    if len(tail_tokens) > 2:
+        subject = clean_subject_token(tail_tokens[2])
+    if len(tail_tokens) > 3:
+        activity = normalize_whitespace(" ".join(tail_tokens[3:]))
+
+    return [serial, teacher, in_time, out_time, class_taught, no_of_students, subject, activity, homework]
+
+
+def extract_class_rows(table):
+    class_rows = []
+    in_class_section = False
+
+    for row in table:
+        normalized_row = [normalize_whitespace(cell) for cell in row]
+        joined = " ".join(cell.lower() for cell in normalized_row if cell)
+
+        if "class details" in joined:
+            in_class_section = True
+            continue
+
+        if not in_class_section:
+            continue
+
+        if "any other extra activities" in joined or "visitors information" in joined:
+            break
+
+        parsed_from_line = parse_class_row_from_text(" ".join(normalized_row))
+        if parsed_from_line:
+            class_rows.append(parsed_from_line)
+            continue
+
+        if normalized_row and re.fullmatch(r"\d+", normalized_row[0] or ""):
+            padded = normalized_row + [""] * (9 - len(normalized_row))
+            serial = padded[0]
+            teacher = clean_name_token(padded[1])
+            in_time = clean_time_token(padded[2]) or clean_time_token(" ".join(padded[2:4])) or padded[2]
+            out_time = clean_time_token(padded[3]) or padded[3]
+
+            remaining = [cell for cell in padded[4:] if cell]
+            class_taught = ""
+            no_of_students = ""
+            subject = ""
+            activity = ""
+            homework = ""
+
+            if remaining:
+                if len(remaining) >= 4 and re.search(r"\d", remaining[1]):
+                    class_taught = clean_class_token(remaining[0])
+                    no_of_students = clean_numeric_token(remaining[1])
+                    subject = clean_subject_token(remaining[2])
+                    activity = normalize_whitespace(remaining[3])
+                    homework = remaining[4] if len(remaining) > 4 else ""
+                else:
+                    no_of_students = clean_numeric_token(remaining[0])
+                    subject = clean_subject_token(remaining[1]) if len(remaining) > 1 else ""
+                    activity = normalize_whitespace(remaining[2]) if len(remaining) > 2 else ""
+                    homework = remaining[3] if len(remaining) > 3 else ""
+
+            class_rows.append([
+                serial,
+                teacher,
+                in_time,
+                out_time,
+                class_taught,
+                no_of_students,
+                subject,
+                activity,
+                homework,
+            ])
+
+    return class_rows[:8]
+
+
+def reconstruct_daily_report(table):
+    """Reshape OCR output into the expected daily report sheet."""
+    flattened_lines = [normalize_whitespace(" ".join(cell for cell in row if cell)) for row in table]
+    flattened_lines = [line for line in flattened_lines if line]
+    flattened_text = "\n".join(flattened_lines)
+
+    date_value = extract_first_match(flattened_text, [
+        r"date[:\s]*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})",
+        r"\b([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})\b",
+    ])
+    day_value = extract_first_match(flattened_text, [r"day[:\s]*([A-Za-z]{3,9})"])
+    if not day_value and date_value:
+        day_value = infer_day_from_date(date_value)
+    day_value = day_value.upper()[:3] if day_value else ""
+
+    total_students = extract_first_match(flattened_text, [
+        r"total(?:\s+number)?(?:\s+students)?(?:\s+present)?[:\s]*([0-9]+)",
+        r"students\s+present[:\s]*([0-9]+)",
+    ])
+
+    thought = extract_first_match(flattened_text, [
+        r"thought of the day[:\s]*(.+?)(?:\n|daily checklist|class details|$)",
+    ])
+
+    checklist_values = extract_checklist_values_from_rows(table)
+    if not any(line.endswith(": Y") or line.endswith(": N") for line in checklist_values):
+        # Fallback to prior flattened extraction if row-aware extraction fails.
+        fallback_markers = [
+            ("Centre started on time", ["centre", "start"]),
+            ("Students wore I-Cards", ["students", "wore"]),
+            ("Volunteers wore I-Cards", ["volunteer", "wore"]),
+            ("Footwears placed properly", ["footwear"]),
+            ("Prayer Conducted", ["prayer", "conduct"]),
+            ("Explained the Thought", ["explained", "thought"]),
+            ("Physical Activity", ["physical", "activity"]),
+            ("Student's Attendance taken", ["student", "attendance"]),
+            ("Closing prayer conducted", ["closing", "prayer"]),
+            ("Centre closed on Time", ["centre", "closed"]),
+        ]
+        checklist_values = []
+        for label, keywords in fallback_markers:
+            value = extract_checklist_value(flattened_text, keywords)
+            checklist_values.append(f"{label}: {value}".rstrip())
+
+    class_rows = extract_class_rows(table)
+    while len(class_rows) < 8:
+        class_rows.append([str(len(class_rows) + 1), "", "", "", "", "", "", "", ""])
+
+    day_headers = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+    reconstructed = [
+        [
+            f"DATE: {date_value}" if date_value else "DATE:",
+            f"DAY: {day_value}" if day_value else "DAY: MON",
+            day_headers[1],
+            day_headers[2],
+            day_headers[3],
+            day_headers[4],
+            day_headers[5],
+            day_headers[6],
+            f"TOTAL NUMBER STUDENTS PRESENT: {total_students}" if total_students else "TOTAL NUMBER STUDENTS PRESENT:",
+        ],
+        ["THOUGHT OF THE DAY:", thought, "", "", "", "", "", "", ""],
+        ["DAILY CHECKLIST", "", "", "", "", "", "", "", ""],
+        ["[Put Y for Yes N for No for the points mentioned below]", "", "", "", "", "", "", "", ""],
+        checklist_values[:5] + ["", "", "", ""],
+        checklist_values[5:] + ["", "", "", ""],
+        ["CLASS DETAILS", "", "", "", "", "", "", "", ""],
+        ["SN", "Volunteer/Teacher's Name", "In-time", "Out-time", "Class Taught", "No of students", "Subject", "Class Activity", "Homework"],
+    ]
+
+    reconstructed.extend(class_rows)
+    reconstructed.extend([
+        ["ANY OTHER EXTRA ACTIVITIES:", "", "", "", "", "", "", "", ""],
+        ["VISITORS INFORMATION ALONG WITH CONTACT DETAILS:", "", "", "", "", "", "", "", ""],
+        ["ANY SUGGESTION/IDEA FOR FURTHER BETTERMENT OR CHALLENGES FACED:", "", "", "", "", "", "", "", ""],
+    ])
+
+    return reconstructed
+
+
 # ─── FALLBACK: FULL-IMAGE OCR WITHOUT GRID ───────────────────────────────────────
 
 def fallback_full_image_ocr(image_path):
@@ -323,6 +681,9 @@ def process_image(image_path):
     # Step 6: Normalize columns
     table = normalize_columns(table)
 
+    if looks_like_daily_report(table):
+        table = reconstruct_daily_report(table)
+
     return table
 
 
@@ -330,5 +691,44 @@ def process_image(image_path):
 
 def save_to_excel(table, output_path):
     """Save the validated table to an Excel file."""
-    df = pd.DataFrame(table)
-    df.to_excel(output_path, index=False, header=False)
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Extracted Data"
+
+    for row_index, row in enumerate(table, start=1):
+        for col_index, value in enumerate(row, start=1):
+            sheet.cell(row=row_index, column=col_index, value=value)
+
+    thin_gray = Side(style="thin", color="D9DDE5")
+    border = Border(left=thin_gray, right=thin_gray, top=thin_gray, bottom=thin_gray)
+    heading_fill = PatternFill(fill_type="solid", fgColor="F7F9FC")
+
+    for row in sheet.iter_rows():
+        for cell in row:
+            cell.border = border
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            if cell.row in {3, 7, 8}:
+                cell.font = Font(bold=True)
+                cell.fill = heading_fill
+
+    column_widths = {
+        "A": 24,
+        "B": 18,
+        "C": 13,
+        "D": 13,
+        "E": 12,
+        "F": 12,
+        "G": 12,
+        "H": 12,
+        "I": 14,
+    }
+    for column, width in column_widths.items():
+        sheet.column_dimensions[column].width = width
+
+    for row_number in range(1, len(table) + 1):
+        sheet.row_dimensions[row_number].height = 34
+
+    workbook.save(output_path)
