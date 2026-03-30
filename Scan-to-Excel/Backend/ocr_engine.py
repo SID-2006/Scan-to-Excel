@@ -199,37 +199,120 @@ def filter_ocr_results_to_bbox(ocr_results, bbox, padding=8):
     return filtered
 
 
+def is_daily_report_text(text):
+    lowered = (text or "").lower()
+    signals = [
+        "daily centre report",
+        "daily checklist",
+        "class details",
+        "thought of the day",
+        "volunteer/teacher",
+    ]
+    return sum(1 for signal in signals if signal in lowered) >= 2
+
+
+def table_from_ocr_results(ocr_results, row_threshold=15):
+    """Group OCR detections into row-wise text by y proximity."""
+    if not ocr_results:
+        return []
+
+    ordered = sorted(ocr_results, key=lambda r: (r[2], r[1]))
+    rows = []
+    current_row = []
+    current_y = None
+
+    for text, cx, cy in ordered:
+        if current_y is None:
+            current_y = cy
+
+        if abs(cy - current_y) <= row_threshold:
+            current_row.append((cx, text))
+        else:
+            rows.append(current_row)
+            current_row = [(cx, text)]
+            current_y = cy
+
+    if current_row:
+        rows.append(current_row)
+
+    table = []
+    for row in rows:
+        row.sort(key=lambda item: item[0])
+        table.append([cell[1] for cell in row])
+
+    return table
+
+
 # ─── STEP 4: OCR THE FULL IMAGE, THEN MAP TO GRID ───────────────────────────────
 
-def ocr_full_image(image_path):
+def ocr_full_image(image_path, use_enhanced_fallback=False):
     """
     Run PaddleOCR on the full image and return list of (text, center_x, center_y).
     This is MUCH more accurate than cropping tiny cells and OCR-ing each separately.
     """
     results = []
 
-    try:
-        # Use the predict method (relying on paddlex defaults)
-        predictions = list(ocr.predict(image_path))
+    def _collect(predictions):
+        collected = []
         for pred in predictions:
-            # OCRResult is dict-like with rec_texts and dt_polys
             rec_texts = None
             dt_polys = None
 
-            # Try attribute access first, then dict access
-            if hasattr(pred, 'rec_texts'):
+            if hasattr(pred, "rec_texts"):
                 rec_texts = pred.rec_texts
                 dt_polys = pred.dt_polys
             elif isinstance(pred, dict):
-                rec_texts = pred.get('rec_texts', [])
-                dt_polys = pred.get('dt_polys', [])
+                rec_texts = pred.get("rec_texts", [])
+                dt_polys = pred.get("dt_polys", [])
 
             if rec_texts and dt_polys is not None:
                 for text, poly in zip(rec_texts, dt_polys):
+                    value = text.strip()
+                    if not value:
+                        continue
                     poly = np.array(poly)
                     cx = float(np.mean(poly[:, 0]))
                     cy = float(np.mean(poly[:, 1]))
-                    results.append((text.strip(), cx, cy))
+                    collected.append((value, cx, cy))
+        return collected
+
+    try:
+        # Pass 1: original image
+        predictions = list(ocr.predict(image_path))
+        results = _collect(predictions)
+
+        # Pass 2 (optional): contrast-enhanced fallback for sparse text results.
+        if use_enhanced_fallback and len(results) < 24:
+            source = cv2.imread(image_path)
+            if source is not None:
+                gray = cv2.cvtColor(source, cv2.COLOR_BGR2GRAY)
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                enhanced = clahe.apply(gray)
+                enhanced = cv2.fastNlMeansDenoising(enhanced, h=9)
+                enhanced = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                    cv2.imwrite(tmp.name, enhanced)
+                    enhanced_path = tmp.name
+
+                try:
+                    fallback_predictions = list(ocr.predict(enhanced_path))
+                    fallback_results = _collect(fallback_predictions)
+                finally:
+                    try:
+                        os.remove(enhanced_path)
+                    except OSError:
+                        pass
+
+                if fallback_results:
+                    # Merge near-duplicates by coarse center buckets.
+                    merged = {}
+                    for text, cx, cy in results + fallback_results:
+                        key = (int(cx // 8), int(cy // 8))
+                        old = merged.get(key, "")
+                        if len(text) > len(old):
+                            merged[key] = text
+                    results = [(text, key[0] * 8.0, key[1] * 8.0) for key, text in merged.items()]
     except Exception as e:
         import traceback
         print(f"[WARN] PaddleOCR predict failed: {e}")
@@ -558,6 +641,9 @@ def clean_class_token(value):
     if ordinal_match:
         number = ordinal_match.group(1)
         suffix = (ordinal_match.group(2) or "th").lower()
+        if ordinal_match.group(2) is None and int(number) > 12:
+            # Keep large class codes as-is (e.g. "228"), don't force ordinal.
+            return number
         if number.endswith("1") and number != "11":
             suffix = "st"
         elif number.endswith("2") and number != "12":
@@ -753,7 +839,43 @@ def extract_class_rows(table):
                 homework,
             ])
 
-    return class_rows[:8]
+    class_rows = class_rows[:8]
+
+    # Normalize row timings using the most common in/out time where OCR is noisy.
+    if class_rows:
+        from collections import Counter
+
+        def _parse_minutes(token):
+            match = re.match(r"^(\d{1,2}):(\d{2})$", normalize_whitespace(token))
+            if not match:
+                return None
+            hour = int(match.group(1))
+            minute = int(match.group(2))
+            if hour > 23 or minute > 59:
+                return None
+            return hour * 60 + minute
+
+        valid_in = [row[2] for row in class_rows if _parse_minutes(row[2]) is not None]
+        valid_out = [row[3] for row in class_rows if _parse_minutes(row[3]) is not None]
+        mode_in = Counter(valid_in).most_common(1)[0][0] if valid_in else ""
+        mode_out = Counter(valid_out).most_common(1)[0][0] if valid_out else ""
+
+        for row in class_rows:
+            in_minutes = _parse_minutes(row[2])
+            out_minutes = _parse_minutes(row[3])
+
+            if in_minutes is None and mode_in:
+                row[2] = mode_in
+                in_minutes = _parse_minutes(row[2])
+            if out_minutes is None and mode_out:
+                row[3] = mode_out
+                out_minutes = _parse_minutes(row[3])
+
+            # If out-time is implausibly earlier than in-time, snap to common out-time.
+            if in_minutes is not None and out_minutes is not None and out_minutes < in_minutes and mode_out:
+                row[3] = mode_out
+
+    return class_rows
 
 
 def reconstruct_daily_report(table):
@@ -766,7 +888,7 @@ def reconstruct_daily_report(table):
         r"date[:\s]*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})",
         r"\b([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})\b",
     ])
-    day_value = extract_first_match(flattened_text, [r"day[:\s]*([A-Za-z]{3,9})"])
+    day_value = extract_first_match(flattened_text, [r"day[:\s]*(MON|TUE|WED|THU|FRI|SAT|SUN)"])
     if not day_value and date_value:
         day_value = infer_day_from_date(date_value)
     day_value = day_value.upper()[:3] if day_value else ""
@@ -779,6 +901,8 @@ def reconstruct_daily_report(table):
     thought = extract_first_match(flattened_text, [
         r"thought of the day[:\s]*(.+?)(?:\n|daily checklist|class details|$)",
     ])
+    if "daily checklist" in thought.lower():
+        thought = ""
 
     checklist_values = extract_checklist_values_from_rows(table)
     if not any(line.endswith(": Y") or line.endswith(": N") for line in checklist_values):
@@ -846,39 +970,7 @@ def fallback_full_image_ocr(image_path, table_bbox=None):
     ocr_results = ocr_full_image(image_path)
     ocr_results = filter_ocr_results_to_bbox(ocr_results, table_bbox)
 
-    if not ocr_results:
-        return []
-
-    # Sort by y then x
-    ocr_results.sort(key=lambda r: (r[2], r[1]))
-
-    # Group into rows by Y proximity
-    rows = []
-    current_row = []
-    current_y = None
-    row_threshold = 15
-
-    for text, cx, cy in ocr_results:
-        if current_y is None:
-            current_y = cy
-
-        if abs(cy - current_y) <= row_threshold:
-            current_row.append((cx, text))
-        else:
-            rows.append(current_row)
-            current_row = [(cx, text)]
-            current_y = cy
-
-    if current_row:
-        rows.append(current_row)
-
-    # Sort each row by x position
-    table = []
-    for row in rows:
-        row.sort(key=lambda item: item[0])
-        table.append([cell[1] for cell in row])
-
-    return table
+    return table_from_ocr_results(ocr_results, row_threshold=15)
 
 
 # ─── MAIN PIPELINE ───────────────────────────────────────────────────────────────
@@ -922,7 +1014,7 @@ def process_image(image_path):
             scale = 1900.0 / float(max_dim)
             new_w = max(1, int(img_w * scale))
             new_h = max(1, int(img_h * scale))
-            working_image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            working_image = cv2.resize(working_image, (new_w, new_h), interpolation=cv2.INTER_AREA)
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                 cv2.imwrite(tmp.name, working_image)
                 temp_path = tmp.name
@@ -947,7 +1039,17 @@ def process_image(image_path):
             col_bounds = find_boundaries(vertical, axis=0)
 
         # Step 4: OCR the full image (much better than per-cell OCR)
-        ocr_results = ocr_full_image(working_path)
+        ocr_results_all = ocr_full_image(working_path, use_enhanced_fallback=True)
+
+        # Daily report forms are more reliable with full-page OCR + template reconstruction.
+        full_text = " ".join(text for text, _, _ in ocr_results_all)
+        if is_daily_report_text(full_text):
+            table = table_from_ocr_results(ocr_results_all, row_threshold=16)
+            table = validate_and_clean(table)
+            table = normalize_columns(table)
+            return reconstruct_daily_report(table)
+
+        ocr_results = ocr_results_all
         ocr_results = filter_ocr_results_to_bbox(ocr_results, table_bbox)
 
         if len(row_bounds) >= 3 and len(col_bounds) >= 3 and ocr_results:
