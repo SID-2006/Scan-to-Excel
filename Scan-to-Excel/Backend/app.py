@@ -3,6 +3,7 @@ from flask_cors import CORS
 import os
 from werkzeug.utils import secure_filename
 from ocr_engine import process_image, process_pdf, save_to_excel
+from end_to_end_jte_pipeline import run_end_to_end_table_extraction
 
 app = Flask(__name__)
 CORS(app)
@@ -66,6 +67,44 @@ def download_excel():
     save_to_excel(table, output_path)
 
     return send_file(output_path, as_attachment=True)
+
+
+@app.route("/upload-jte", methods=["POST"])
+def upload_file_jte():
+    """
+    End-to-end JTE extraction route.
+    Returns corrected rows + metadata + generated excel path.
+    """
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    file = request.files["file"]
+    if not file or not file.filename:
+        return jsonify({"error": "Invalid file"}), 400
+
+    filename = secure_filename(file.filename)
+    if not filename:
+        return jsonify({"error": "Invalid filename"}), 400
+
+    file_path = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(file_path)
+
+    try:
+        excel_path = os.path.join(OUTPUT_FOLDER, "jte_output.xlsx")
+        corrected_rows, metadata, generated_excel_path = run_end_to_end_table_extraction(
+            file_path,
+            output_excel_path=excel_path,
+            cfg={"DEBUG": False},
+        )
+        return jsonify(
+            {
+                "data": corrected_rows,
+                "metadata": metadata,
+                "excel_path": generated_excel_path,
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 import os

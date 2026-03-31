@@ -6,6 +6,8 @@ try:
     import tempfile
     import re
     from paddlex import create_pipeline
+    from correction_layer import run_correction_engine
+    from ml_text_corrector import load_model
 except ImportError as e:
     import sys
     print(f"\n[ERROR] Missing dependency: {e}")
@@ -22,6 +24,79 @@ os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
 
 # Initialize PaddleX OCR pipeline once (expensive to load)
 ocr = create_pipeline(pipeline="OCR")
+_ML_PREDICTOR = None
+_ML_ATTEMPTED = False
+
+
+def get_ml_predictor():
+    global _ML_PREDICTOR, _ML_ATTEMPTED
+    if _ML_ATTEMPTED:
+        return _ML_PREDICTOR
+
+    model_path = os.path.join(os.path.dirname(__file__), "models", "ocr_text_corrector.pkl")
+    _ML_PREDICTOR = load_model(model_path)
+    _ML_ATTEMPTED = True
+    if _ML_PREDICTOR:
+        print(f"[INFO] Loaded OCR correction ML model: {model_path}")
+    else:
+        print("[INFO] OCR correction ML model not found; using deterministic-only correction.")
+    return _ML_PREDICTOR
+
+
+def infer_schema_from_table(table):
+    """
+    Infer a lightweight schema for correction layer.
+    Prefer explicit class-details header if present, else widest row.
+    """
+    if not table:
+        return []
+
+    class_header = [
+        "SN",
+        "Volunteer/Teacher's Name",
+        "In-time",
+        "Out-time",
+        "Class Taught",
+        "No of students",
+        "Subject",
+        "Class Activity",
+        "Homework",
+    ]
+
+    for row in table:
+        row_text = " ".join((cell or "").lower() for cell in row)
+        if "volunteer/teacher" in row_text and "subject" in row_text and "homework" in row_text:
+            return class_header[: len(row)]
+
+    widest = max(table, key=lambda r: len(r)) if table else []
+    schema = []
+    for idx, cell in enumerate(widest):
+        token = normalize_whitespace(cell)
+        schema.append(token if token else f"col_{idx}")
+    return schema
+
+
+def apply_correction_layer(table):
+    """
+    Run post-OCR correction engine. Falls back to original table on any failure.
+    """
+    if not table:
+        return table
+
+    schema = infer_schema_from_table(table)
+    ml_predictor = get_ml_predictor()
+    try:
+        corrected, _meta = run_correction_engine(
+            table,
+            schema=schema,
+            row_confidences=None,
+            ml_predictor=ml_predictor,
+            cfg={"ENABLE_ML": bool(ml_predictor), "DEBUG": False},
+        )
+        return corrected
+    except Exception as exc:
+        print(f"[WARN] Correction layer failed; using uncorrected table. Reason: {exc}")
+        return table
 
 
 # ─── STEP 1: PREPROCESS IMAGE ───────────────────────────────────────────────────
@@ -600,11 +675,15 @@ def infer_day_from_date(date_text):
 def normalize_yes_no_token(token):
     cleaned = normalize_whitespace(token).upper().strip(":;,. ")
     yes_aliases = {"Y", "YES", "V", "T", "I", "L", "1", "7", ">", "S", "4"}
+    # Common handwritten/checkmark OCR substitutions seen in checklist cells.
+    yes_aliases.update({"E", "P", "H", "C", "O"})
     no_aliases = {"N", "NO", "X"}
     if cleaned in yes_aliases:
         return "Y"
     if cleaned in no_aliases:
         return "N"
+    if cleaned and cleaned[0] in yes_aliases and not cleaned.startswith("N"):
+        return "Y"
     return cleaned
 
 
@@ -642,8 +721,16 @@ def clean_class_token(value):
         number = ordinal_match.group(1)
         suffix = (ordinal_match.group(2) or "th").lower()
         if ordinal_match.group(2) is None and int(number) > 12:
-            # Keep large class codes as-is (e.g. "228"), don't force ordinal.
-            return number
+            # OCR noise heuristic: use leading digit as class ordinal (e.g. 228 -> 2nd).
+            lead_digit = number[0]
+            n = int(lead_digit)
+            if n == 1:
+                return "1st"
+            if n == 2:
+                return "2nd"
+            if n == 3:
+                return "3rd"
+            return f"{n}th"
         if number.endswith("1") and number != "11":
             suffix = "st"
         elif number.endswith("2") and number != "12":
@@ -668,9 +755,112 @@ def clean_name_token(value):
 
 
 def clean_subject_token(value):
+    from difflib import SequenceMatcher
+
     token = normalize_whitespace(value)
     token = re.sub(r"[^A-Za-z\s]", "", token)
-    return normalize_whitespace(token).title()
+    token = normalize_whitespace(token).title()
+    lowered = token.lower()
+    if lowered in {"maathi", "marati", "maati"}:
+        return "Marathi"
+    if lowered in {"mavathi", "mathi"}:
+        return "Marathi"
+    if lowered in {"gk", "ak", "ck"}:
+        return "GK"
+    # Fuzzy fallback for noisy spellings.
+    candidates = ["Marathi", "GK", "Basic", "Maths", "English"]
+    joined = re.sub(r"[^a-z]", "", lowered)
+    if joined:
+        best = ""
+        score = -1.0
+        for cand in candidates:
+            s = SequenceMatcher(None, joined, cand.lower()).ratio()
+            if s > score:
+                score = s
+                best = cand
+        if score >= 0.55:
+            return best
+    return token
+
+
+def clean_activity_token(value):
+    token = normalize_whitespace(value)
+    if not token:
+        return ""
+    token = token.replace("Wuiting", "Writing")
+    token = token.replace("Readidg", "Reading")
+    token = token.replace("Wreading", "Wo Reading")
+    token = token.replace("classroom", "Classroom")
+    token = re.sub(r"\s+", " ", token).strip()
+    if token in {"a", "-11-", "--"}:
+        return ""
+    return token
+
+
+def split_subject_and_activity(subject_text, activity_text):
+    subject = clean_subject_token(subject_text)
+    activity = clean_activity_token(activity_text)
+
+    if subject and subject != clean_subject_token(""):
+        # If subject cell contains both subject + activity, split by first token.
+        raw = normalize_whitespace(subject_text)
+        if raw and len(raw.split()) > 1:
+            parts = raw.split()
+            first = clean_subject_token(parts[0])
+            if first in {"Marathi", "GK", "Basic", "Maths", "English"}:
+                subject = first
+                if not activity:
+                    activity = clean_activity_token(" ".join(parts[1:]))
+
+    if not subject and activity:
+        # Sometimes subject is moved to activity column.
+        first = clean_subject_token(activity.split()[0])
+        if first in {"Marathi", "GK", "Basic", "Maths", "English"}:
+            subject = first
+            activity = clean_activity_token(" ".join(activity.split()[1:]))
+
+    return subject, activity
+
+
+def parse_compact_date_token(token):
+    digits = re.sub(r"\D", "", token or "")
+    if len(digits) == 6:
+        day = digits[:2]
+        month = digits[2:4]
+        year = digits[4:6]
+        if 1 <= int(month) <= 12:
+            return f"{day}/{month}/{year}"
+    if len(digits) == 8:
+        day = digits[:2]
+        year = digits[-2:]
+        middle = digits[2:6]
+        month_candidates = []
+        for i in range(0, len(middle) - 1):
+            m = middle[i:i + 2]
+            if m.isdigit() and 1 <= int(m) <= 12:
+                month_candidates.append(m)
+        if month_candidates:
+            month = sorted(month_candidates, key=lambda m: (not m.startswith("0"), int(m)))[0]
+            return f"{day}/{month}/{year}"
+    return ""
+
+
+def infer_date_from_lines(lines):
+    for line in lines[:5]:
+        if "date" not in line.lower():
+            continue
+        compact = parse_compact_date_token(line)
+        if compact:
+            return compact
+        raw = line.replace("|", "/").replace("\\", "/")
+        m = re.search(r"(\d{1,2})\D+(\d{1,2})\D+(\d{2,4})", raw)
+        if m:
+            d = int(m.group(1))
+            mo = int(m.group(2))
+            y = m.group(3)[-2:]
+            if 1 <= d <= 31 and 1 <= mo <= 12:
+                return f"{d:02d}/{mo:02d}/{y}"
+    return ""
 
 
 def extract_checklist_value(section_text, keywords):
@@ -713,7 +903,19 @@ def extract_checklist_values_from_rows(table):
         row_text = " ".join(row_cells)
         lowered = row_text.lower()
 
+        # Prefer per-cell matching so merged multi-checklist rows don't share one trailing token.
+        for cell_text in row_cells:
+            cell_lower = cell_text.lower()
+            for label, keywords in checklist_markers:
+                if all(keyword in cell_lower for keyword in keywords):
+                    guess = extract_yes_no_from_text(cell_text)
+                    if guess:
+                        values_by_label[label] = guess
+
+        # Fallback to row-level match only for labels still missing.
         for label, keywords in checklist_markers:
+            if values_by_label[label]:
+                continue
             if all(keyword in lowered for keyword in keywords):
                 guess = extract_yes_no_from_text(row_text)
                 if guess:
@@ -728,7 +930,11 @@ def extract_checklist_values_from_rows(table):
             if inline_match:
                 values_by_label[label] = normalize_yes_no_token(inline_match.group(1))
 
-    return [f"{label}: {values_by_label[label]}".rstrip() for label, _ in checklist_markers]
+    normalized_lines = []
+    for label, _ in checklist_markers:
+        value = normalize_yes_no_token(values_by_label[label])
+        normalized_lines.append(f"{label}: {value}".rstrip())
+    return normalized_lines
 
 
 def parse_class_row_from_text(row_text):
@@ -779,6 +985,7 @@ def parse_class_row_from_text(row_text):
 
 def extract_class_rows(table):
     class_rows = []
+    orphan_lines = []
     in_class_section = False
 
     for row in table:
@@ -827,6 +1034,30 @@ def extract_class_rows(table):
                     activity = normalize_whitespace(remaining[2]) if len(remaining) > 2 else ""
                     homework = remaining[3] if len(remaining) > 3 else ""
 
+            # Handle common OCR shift: class cell holds student count, and subject+activity spill.
+            if not no_of_students and re.fullmatch(r"\d+", normalize_whitespace(class_taught or "")):
+                candidate_count = clean_numeric_token(class_taught)
+                if candidate_count:
+                    no_of_students = candidate_count
+                    class_taught = ""
+
+            merged_subject_activity = normalize_whitespace(padded[6])
+            if merged_subject_activity and not activity:
+                pieces = merged_subject_activity.split()
+                if len(pieces) >= 2:
+                    subject = clean_subject_token(pieces[0])
+                    activity = normalize_whitespace(" ".join(pieces[1:]))
+
+            if subject and subject.lower() in {"wreading", "reading", "wuiting", "writing"} and not activity:
+                activity = subject
+                if normalize_whitespace(padded[5]):
+                    subject = clean_subject_token(padded[5])
+                else:
+                    subject = ""
+
+            subject, activity = split_subject_and_activity(subject, activity)
+            activity = clean_activity_token(activity)
+
             class_rows.append([
                 serial,
                 teacher,
@@ -838,8 +1069,87 @@ def extract_class_rows(table):
                 activity,
                 homework,
             ])
+            continue
+
+        # Capture probable continuation rows where subject/activity is printed
+        # in the next line under class table.
+        non_empty = [cell for cell in normalized_row if cell]
+        if non_empty:
+            row_text = normalize_whitespace(" ".join(non_empty))
+            lowered = row_text.lower()
+            looks_like_header = any(
+                key in lowered
+                for key in [
+                    "class details",
+                    "volunteer/teacher",
+                    "in-time",
+                    "out-time",
+                    "no of",
+                    "taught",
+                    "students",
+                    "subject",
+                    "class activity",
+                    "homework",
+                    "sn",
+                ]
+            )
+            looks_like_main_row = bool(re.search(r"\b\d{1,2}\s*[:.]\s*\d{2}\b", row_text))
+            starts_with_serial = bool(non_empty and re.fullmatch(r"\d+", non_empty[0]))
+            has_alpha = bool(re.search(r"[A-Za-z]", row_text))
+            if (
+                not looks_like_header
+                and not looks_like_main_row
+                and not starts_with_serial
+                and has_alpha
+                and len(row_text) <= 40
+            ):
+                orphan_lines.append(row_text)
 
     class_rows = class_rows[:8]
+
+    # Attach orphan continuation lines (subject/activity spillover) to rows in order.
+    if class_rows and orphan_lines:
+        target_idx = 0
+        for orphan in orphan_lines:
+            if target_idx >= len(class_rows):
+                break
+            tokens = orphan.split()
+            subj_guess = clean_subject_token(tokens[0]) if tokens else ""
+            activity_guess = normalize_whitespace(" ".join(tokens[1:])) if len(tokens) > 1 else ""
+            activity_guess = clean_activity_token(activity_guess)
+
+            row = class_rows[target_idx]
+            if not normalize_whitespace(row[6]) and subj_guess in {"Marathi", "GK", "Basic", "Maths", "English"}:
+                row[6] = subj_guess
+            elif not normalize_whitespace(row[7]) and subj_guess:
+                # If subject already present, spill this token into activity.
+                row[7] = clean_activity_token(subj_guess)
+
+            if activity_guess:
+                existing = normalize_whitespace(row[7])
+                merged = normalize_whitespace(f"{existing} {activity_guess}") if existing else activity_guess
+                row[7] = clean_activity_token(merged)
+
+            target_idx += 1
+
+    # Remove lightweight mis-split rows (e.g. "6 | th" with no real payload).
+    filtered_rows = []
+    for row in class_rows:
+        teacher = normalize_whitespace(row[1]).lower()
+        class_taught = clean_class_token(row[4])
+        subject = clean_subject_token(row[6])
+        activity = normalize_whitespace(row[7])
+        payload_score = sum(
+            1
+            for token in [teacher, row[2], row[3], class_taught, row[5], subject, activity]
+            if normalize_whitespace(token)
+        )
+        if teacher in {"th", "st", "nd", "rd"} and payload_score <= 3:
+            continue
+        row[4] = class_taught
+        row[6] = subject
+        filtered_rows.append(row)
+    class_rows = filtered_rows[:8]
 
     # Normalize row timings using the most common in/out time where OCR is noisy.
     if class_rows:
@@ -863,6 +1173,9 @@ def extract_class_rows(table):
         for row in class_rows:
             in_minutes = _parse_minutes(row[2])
             out_minutes = _parse_minutes(row[3])
+            has_payload = any(normalize_whitespace(cell) for cell in row[1:])
+            if not has_payload:
+                continue
 
             if in_minutes is None and mode_in:
                 row[2] = mode_in
@@ -874,6 +1187,28 @@ def extract_class_rows(table):
             # If out-time is implausibly earlier than in-time, snap to common out-time.
             if in_minutes is not None and out_minutes is not None and out_minutes < in_minutes and mode_out:
                 row[3] = mode_out
+
+    # Normalize serial numbers to 1..8 for consistent template output.
+    for idx, row in enumerate(class_rows, start=1):
+        row[0] = str(idx)
+        row[6], row[7] = split_subject_and_activity(row[6], row[7])
+        row[7] = clean_activity_token(row[7])
+        if row[6] and row[6].lower() in {"wreading", "reading", "writing"}:
+            if not row[7]:
+                row[7] = clean_activity_token(row[6])
+            row[6] = ""
+
+    # Fill missing subject from dominant subject if row has activity but empty subject.
+    subject_values = [normalize_whitespace(r[6]) for r in class_rows if normalize_whitespace(r[6])]
+    mode_subject = ""
+    if subject_values:
+        from collections import Counter
+
+        mode_subject = Counter(subject_values).most_common(1)[0][0]
+    if mode_subject:
+        for row in class_rows:
+            if not normalize_whitespace(row[6]) and normalize_whitespace(row[7]):
+                row[6] = mode_subject
 
     return class_rows
 
@@ -888,15 +1223,24 @@ def reconstruct_daily_report(table):
         r"date[:\s]*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})",
         r"\b([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})\b",
     ])
-    day_value = extract_first_match(flattened_text, [r"day[:\s]*(MON|TUE|WED|THU|FRI|SAT|SUN)"])
-    if not day_value and date_value:
-        day_value = infer_day_from_date(date_value)
-    day_value = day_value.upper()[:3] if day_value else ""
-
-    total_students = extract_first_match(flattened_text, [
-        r"total(?:\s+number)?(?:\s+students)?(?:\s+present)?[:\s]*([0-9]+)",
-        r"students\s+present[:\s]*([0-9]+)",
-    ])
+    if not date_value:
+        compact_date = extract_first_match(flattened_text, [r"date[:\s]*([0-9]{6,8})"])
+        date_value = parse_compact_date_token(compact_date)
+    if not date_value:
+        date_value = infer_date_from_lines(flattened_lines)
+    total_students = ""
+    for line in flattened_lines:
+        line_l = line.lower()
+        if "total" in line_l and "students" in line_l:
+            nums = re.findall(r"\b(\d{1,3})\b", line)
+            if nums:
+                total_students = nums[-1]
+                break
+    if not total_students:
+        total_students = extract_first_match(flattened_text, [
+            r"total(?:\s+number)?(?:\s+students)?(?:\s+present)?[:\s]*([0-9]+)",
+            r"students\s+present[:\s]*([0-9]+)",
+        ])
 
     thought = extract_first_match(flattened_text, [
         r"thought of the day[:\s]*(.+?)(?:\n|daily checklist|class details|$)",
@@ -925,28 +1269,48 @@ def reconstruct_daily_report(table):
             checklist_values.append(f"{label}: {value}".rstrip())
 
     class_rows = extract_class_rows(table)
+    inferred_students = 0
+    inferred_count_cells = 0
+    inferred_max = 0
+    for row in class_rows:
+        val = clean_numeric_token(row[5])
+        if val:
+            n = int(val)
+            inferred_students += n
+            inferred_count_cells += 1
+            inferred_max = max(inferred_max, n)
+    if inferred_students > 0:
+        try:
+            parsed_total = int(total_students) if total_students else 0
+        except Exception:
+            parsed_total = 0
+        # Only use inferred total when header total is missing/clearly implausible
+        # and inferred counts look sane.
+        if (
+            (parsed_total <= 0 or parsed_total > 80)
+            and inferred_count_cells >= 2
+            and inferred_max <= 25
+        ):
+            total_students = str(inferred_students)
     while len(class_rows) < 8:
         class_rows.append([str(len(class_rows) + 1), "", "", "", "", "", "", "", ""])
 
-    day_headers = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
     reconstructed = [
         [
             f"DATE: {date_value}" if date_value else "DATE:",
-            f"DAY: {day_value}" if day_value else "DAY: MON",
-            day_headers[1],
-            day_headers[2],
-            day_headers[3],
-            day_headers[4],
-            day_headers[5],
-            day_headers[6],
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
             f"TOTAL NUMBER STUDENTS PRESENT: {total_students}" if total_students else "TOTAL NUMBER STUDENTS PRESENT:",
         ],
         ["THOUGHT OF THE DAY:", thought, "", "", "", "", "", "", ""],
-        ["DAILY CHECKLIST", "", "", "", "", "", "", "", ""],
-        ["[Put Y for Yes N for No for the points mentioned below]", "", "", "", "", "", "", "", ""],
+        ["", "[Put Y for Yes N for No for the points mentioned below]", "", "", "", "", "", "", ""],
         checklist_values[:5] + ["", "", "", ""],
         checklist_values[5:] + ["", "", "", ""],
-        ["CLASS DETAILS", "", "", "", "", "", "", "", ""],
         ["SN", "Volunteer/Teacher's Name", "In-time", "Out-time", "Class Taught", "No of students", "Subject", "Class Activity", "Homework"],
     ]
 
@@ -1047,7 +1411,8 @@ def process_image(image_path):
             table = table_from_ocr_results(ocr_results_all, row_threshold=16)
             table = validate_and_clean(table)
             table = normalize_columns(table)
-            return reconstruct_daily_report(table)
+            table = reconstruct_daily_report(table)
+            return table
 
         ocr_results = ocr_results_all
         ocr_results = filter_ocr_results_to_bbox(ocr_results, table_bbox)
@@ -1072,10 +1437,11 @@ def process_image(image_path):
 
         if looks_like_daily_report(table):
             table = reconstruct_daily_report(table)
+            return table
         else:
             table = repair_generic_table_structure(table)
 
-        return table
+        return apply_correction_layer(table)
     finally:
         if temp_path:
             try:
