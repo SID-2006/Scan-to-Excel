@@ -5,6 +5,7 @@ FROM python:3.10-slim-bullseye
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 ENV PORT 5001
+ENV PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
 
 # Install system dependencies for OpenCV and PaddleOCR
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -34,4 +35,4 @@ RUN mkdir -p uploads outputs
 EXPOSE 5001
 
 # Run the application with Gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--workers", "4", "--timeout", "120", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--workers", "1", "--preload", "--timeout", "120", "app:app"]

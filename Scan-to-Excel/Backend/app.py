@@ -3,6 +3,13 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
+import paddle
+
+# Set Paddle memory flags for production stability
+paddle.set_flags({
+    "FLAGS_eager_delete_scope": True,
+    "FLAGS_fraction_of_cpu_memory_to_use": 0.1,
+})
 
 from gemini_autocorrect import autocorrect_with_gemini
 from ocr_engine import process_image, process_pdf, save_to_excel

@@ -21,6 +21,8 @@ except ImportError as e:
 os.environ["FLAGS_use_mkldnn"] = "0"
 # Avoid slow external model host checks on every backend start.
 os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
+# Limit CPU usage to prevent memory spikes during parallel execution
+os.environ["CPU_NUM"] = "1"
 
 # Initialize PaddleX OCR pipeline once (expensive to load)
 ocr = create_pipeline(pipeline="OCR")
