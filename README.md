@@ -1,34 +1,42 @@
 # Scan to Excel
 
-Scan to Excel is a full-stack OCR app that extracts tabular data from scanned images and PDFs, lets you review and correct the detected rows in the browser, and exports the final result as an Excel file.
+> Turn scanned tables, forms, and PDFs into editable spreadsheet data.
 
-## What It Does
+Scan to Excel is a full-stack OCR application that extracts tabular data from scanned images and PDF documents, lets you review and correct the output in the browser, and exports the cleaned result as an Excel file.
 
-- Upload scanned images or PDF documents
-- Detect table structure using OpenCV
-- Extract text using PaddleOCR
-- Handle both generic tables and daily report-style forms
-- Preview and edit extracted data in the frontend
-- Download the cleaned result as an `.xlsx` spreadsheet
-
-## Project Structure
+## Overview
 
 ```text
-Scan-to-Excel/
-├── Backend/
-│   ├── app.py
-│   ├── ocr_engine.py
-│   ├── requirements.txt
-│   ├── setup_venv.sh
-│   ├── uploads/
-│   └── outputs/
-├── frontend/
-│   ├── package.json
-│   ├── public/
-│   └── src/
-├── install_all_dependencies.sh
-└── README.md
+Upload document -> detect table -> run OCR -> review/edit data -> export .xlsx
 ```
+
+### Highlights
+
+- Supports image and PDF uploads
+- Detects table structure using OpenCV
+- Extracts text using PaddleOCR
+- Reconstructs both generic tables and daily report-style forms
+- Lets users correct OCR output before export
+- Generates formatted `.xlsx` files
+
+## Demo Flow
+
+1. Upload a scanned image or PDF.
+2. The backend detects the document and table layout.
+3. OCR extracts text from the detected regions.
+4. The frontend shows the extracted table in an editable view.
+5. You download the corrected data as an Excel spreadsheet.
+
+## Features
+
+| Feature | Description |
+| --- | --- |
+| OCR extraction | Reads printed table content from scanned files |
+| Table reconstruction | Maps OCR results back into rows and columns |
+| PDF support | Converts PDF pages into images and extracts page by page |
+| Editable preview | Lets users manually fix cells before export |
+| Excel export | Downloads cleaned data as `.xlsx` |
+| Daily report handling | Includes logic for structured daily report forms |
 
 ## Tech Stack
 
@@ -52,15 +60,39 @@ Scan-to-Excel/
 - Framer Motion
 - Lucide React
 
-## How It Works
+## Project Structure
 
-1. The user uploads an image or PDF from the React frontend.
-2. The Flask backend saves the file and sends it through the OCR pipeline.
-3. `ocr_engine.py` preprocesses the document, detects the table area, runs OCR, and reconstructs the extracted rows.
-4. The frontend displays the detected table and allows manual correction.
-5. The corrected data is posted back to the backend and exported as an Excel file.
+```text
+Scan-to-Excel/
+├── Backend/
+│   ├── app.py
+│   ├── ocr_engine.py
+│   ├── requirements.txt
+│   ├── setup_venv.sh
+│   ├── uploads/
+│   └── outputs/
+├── frontend/
+│   ├── package.json
+│   ├── public/
+│   └── src/
+├── install_all_dependencies.sh
+└── README.md
+```
 
-## Setup
+## Architecture
+
+### Backend flow
+
+- [app.py](/f:/CEP/Scan-to-Excel/Scan-to-Excel/Backend/app.py) exposes the API endpoints
+- [ocr_engine.py](/f:/CEP/Scan-to-Excel/Scan-to-Excel/Backend/ocr_engine.py) runs the OCR and table extraction pipeline
+- Extracted data is saved as Excel through `openpyxl`
+
+### Frontend flow
+
+- [App.js](/f:/CEP/Scan-to-Excel/Scan-to-Excel/frontend/src/App.js) coordinates upload, processing, preview, and download
+- Users can inspect extracted data and correct individual cells before export
+
+## Quick Start
 
 ### Prerequisites
 
@@ -68,17 +100,17 @@ Scan-to-Excel/
 - Node.js 18+ recommended
 - npm
 
-Note: PaddleOCR and PaddlePaddle can be sensitive to Python/platform combinations. If installation fails, use a Python version known to be supported by your Paddle stack.
+Note: PaddleOCR and PaddlePaddle can be sensitive to Python and platform compatibility. If installation fails, use a Python version supported by your Paddle setup.
 
-## Backend Setup
+### 1. Start the backend
 
-From the `Scan-to-Excel/Backend` directory:
+From `Scan-to-Excel/Backend`:
 
 ```bash
 python -m venv venv
 ```
 
-Activate the virtual environment:
+Activate the environment:
 
 ```bash
 # macOS / Linux
@@ -88,67 +120,60 @@ source venv/bin/activate
 venv\Scripts\Activate.ps1
 ```
 
-Install dependencies:
+Install dependencies and run:
 
 ```bash
 pip install --upgrade pip
 pip install -r requirements.txt
-```
-
-Run the backend:
-
-```bash
 python app.py
 ```
 
-The API runs on:
+Backend URL:
 
 ```text
 http://127.0.0.1:5001
 ```
 
-## Frontend Setup
+### 2. Start the frontend
 
-From the `Scan-to-Excel/frontend` directory:
+From `Scan-to-Excel/frontend`:
 
 ```bash
 npm install
 npm start
 ```
 
-The frontend usually runs on:
+Frontend URL:
 
 ```text
 http://localhost:3000
 ```
 
-## Full Project Setup
+## Helper Scripts
 
-The repo includes helper scripts:
+The repository includes:
 
 - `install_all_dependencies.sh`
 - `Backend/setup_venv.sh`
 
-These scripts are currently written for macOS/Linux style environments and may need adjustment on Windows.
+These scripts are currently written for macOS/Linux-style environments and may need adjustment on Windows.
 
-## Environment Notes
+## Environment Variables
 
-The backend supports optional PaddleOCR model path overrides through environment variables:
+The backend supports optional PaddleOCR model overrides:
 
 - `PADDLE_OCR_MODEL_ROOT`
 - `PADDLE_OCR_DET_MODEL_DIR`
 - `PADDLE_OCR_REC_MODEL_DIR`
 - `PADDLE_OCR_LANG`
 
-This is useful if the default Paddle model cache is unavailable or you want to use local model folders.
+Use these if the default Paddle model cache is unavailable or if you want to point the app at local model directories.
 
-## API Endpoints
+## API
 
 ### `GET /`
 
 Health check endpoint.
-
-Response:
 
 ```json
 {
@@ -158,19 +183,19 @@ Response:
 
 ### `POST /upload`
 
-Uploads a file and returns extracted table data.
+Uploads a document and returns extracted table data.
 
-Accepted input:
+Accepted files:
 
-- image files
-- PDF files
+- images
+- PDFs
 
 Form fields:
 
 - `file`: uploaded document
-- `max_pages`: optional, for PDFs only, clamped between 1 and 5
+- `max_pages`: optional for PDF uploads, clamped between 1 and 5
 
-Response shape:
+Response:
 
 ```json
 {
@@ -183,7 +208,7 @@ Response shape:
 
 ### `POST /download`
 
-Accepts table data and returns an Excel file.
+Accepts extracted table data and returns an Excel file.
 
 Request body:
 
@@ -198,9 +223,9 @@ Request body:
 
 ### `GET /test-upload`
 
-Processes the sample image stored in the backend folder and returns extracted data. Useful for quick local testing.
+Processes the sample backend image and returns extracted data for quick local testing.
 
-## Supported Input Types
+## Supported File Types
 
 - `.png`
 - `.jpg`
@@ -210,39 +235,33 @@ Processes the sample image stored in the backend folder and returns extracted da
 
 ## Output
 
-- Extracted table data shown in the browser
-- Editable table for manual correction
-- Downloadable Excel file saved as `.xlsx`
+- Browser-based table preview
+- Inline cell editing for OCR corrections
+- Downloadable `.xlsx` spreadsheet
 
-## Current Behavior Highlights
+## Current Behavior
 
-- Backend defaults to port `5001`
+- Backend runs on port `5001`
 - PDF uploads are processed page by page
-- PDF extraction currently processes up to 2 pages by default unless `max_pages` is provided
-- The frontend supports in-browser cell editing before export
-- The backend applies formatting when generating Excel output
+- PDFs default to processing up to `2` pages unless `max_pages` is provided
+- Frontend supports in-browser editing before export
+- Excel output is generated with basic formatting
 
-## Known Limitations
+## Limitations
 
-- OCR quality depends heavily on scan quality, lighting, skew, and table clarity
-- Very complex layouts or low-resolution scans may require manual corrections
-- The helper shell scripts are not cross-platform out of the box
-- Sample uploads, generated outputs, and debug assets are currently stored in the repository
-
-## Development Notes
-
-- Main backend entrypoint: [Backend/app.py](/f:/CEP/Scan-to-Excel/Scan-to-Excel/Backend/app.py)
-- OCR pipeline: [Backend/ocr_engine.py](/f:/CEP/Scan-to-Excel/Scan-to-Excel/Backend/ocr_engine.py)
-- Frontend app shell: [frontend/src/App.js](/f:/CEP/Scan-to-Excel/Scan-to-Excel/frontend/src/App.js)
+- OCR quality depends on scan quality, skew, contrast, and table clarity
+- Complex or low-resolution documents may still need manual correction
+- Helper shell scripts are not fully cross-platform
+- Sample files, generated outputs, and debug assets are currently present in the repository
 
 ## Future Improvements
 
 - Add Docker support
 - Add automated tests for upload and extraction flows
-- Add file size and format validation on the backend
-- Add better multi-page PDF controls in the UI
-- Separate generated files from tracked source assets
+- Add stricter backend file validation
+- Add richer multi-page PDF controls in the UI
+- Move generated and debug artifacts out of tracked source folders
 
 ## License
 
-Add a license section here if you plan to open-source or distribute the project.
+Add a license here if you plan to open-source or distribute the project.
