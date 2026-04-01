@@ -102,9 +102,41 @@ def apply_correction_layer(table):
 # ─── STEP 1: PREPROCESS IMAGE ───────────────────────────────────────────────────
 
 def preprocess_image(image):
-    """Convert to grayscale for line detection."""
+    """Prepare grayscale image for line detection and layout analysis."""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
     return gray
+
+
+def _deskew_for_ocr(gray):
+    """Deskew light document tilt for better OCR recall."""
+    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+    coords = np.column_stack(np.where(thresh > 0))
+    if len(coords) < 150:
+        return gray
+
+    angle = cv2.minAreaRect(coords)[-1]
+    if angle < -45:
+        angle = -(90 + angle)
+    else:
+        angle = -angle
+
+    if abs(angle) < 0.4:
+        return gray
+
+    h, w = gray.shape[:2]
+    matrix = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
+    return cv2.warpAffine(gray, matrix, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+
+
+def build_ocr_ready_image(image):
+    """Create a contrast-enhanced image for text OCR (separate from grid detection path)."""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = _deskew_for_ocr(gray)
+    gray = cv2.fastNlMeansDenoising(gray, h=8)
+    clahe = cv2.createCLAHE(clipLimit=2.4, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+    return cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
 
 
 def detect_document_bbox(image, min_area_ratio=0.08):
@@ -268,9 +300,13 @@ def filter_ocr_results_to_bbox(ocr_results, bbox, padding=8):
     y2 += padding
 
     filtered = []
-    for text, cx, cy in ocr_results:
+    filtered = []
+    for item in ocr_results:
+        text, box = item[0], item[1]
+        cx = (box[0] + box[2]) / 2.0
+        cy = (box[1] + box[3]) / 2.0
         if x1 <= cx <= x2 and y1 <= cy <= y2:
-            filtered.append((text, cx, cy))
+            filtered.append(item)
     return filtered
 
 
@@ -291,12 +327,16 @@ def table_from_ocr_results(ocr_results, row_threshold=15):
     if not ocr_results:
         return []
 
-    ordered = sorted(ocr_results, key=lambda r: (r[2], r[1]))
+    # Sort primarily by Y, then X
+    ordered = sorted(ocr_results, key=lambda r: (r[1][1], r[1][0]))
     rows = []
     current_row = []
     current_y = None
 
-    for text, cx, cy in ordered:
+    for text, bbox in ordered:
+        cx = (bbox[0] + bbox[2]) / 2.0
+        cy = (bbox[1] + bbox[3]) / 2.0
+        
         if current_y is None:
             current_y = cy
 
@@ -346,9 +386,11 @@ def ocr_full_image(image_path, use_enhanced_fallback=False):
                     if not value:
                         continue
                     poly = np.array(poly)
-                    cx = float(np.mean(poly[:, 0]))
-                    cy = float(np.mean(poly[:, 1]))
-                    collected.append((value, cx, cy))
+                    x1 = float(np.min(poly[:, 0]))
+                    y1 = float(np.min(poly[:, 1]))
+                    x2 = float(np.max(poly[:, 0]))
+                    y2 = float(np.max(poly[:, 1]))
+                    collected.append((value, (x1, y1, x2, y2)))
         return collected
 
     try:
@@ -380,14 +422,8 @@ def ocr_full_image(image_path, use_enhanced_fallback=False):
                         pass
 
                 if fallback_results:
-                    # Merge near-duplicates by coarse center buckets.
-                    merged = {}
-                    for text, cx, cy in results + fallback_results:
-                        key = (int(cx // 8), int(cy // 8))
-                        old = merged.get(key, "")
-                        if len(text) > len(old):
-                            merged[key] = text
-                    results = [(text, key[0] * 8.0, key[1] * 8.0) for key, text in merged.items()]
+                    # Soft-merge near duplicates
+                    results += fallback_results
     except Exception as e:
         import traceback
         print(f"[WARN] PaddleOCR predict failed: {e}")
@@ -396,42 +432,187 @@ def ocr_full_image(image_path, use_enhanced_fallback=False):
     return results
 
 
+def merge_ocr_results(primary_results, secondary_results):
+    """
+    Merge OCR detections from two passes while de-duplicating near-identical boxes.
+    Keeps primary results first and supplements missed tokens from secondary pass.
+    """
+    merged = list(primary_results or [])
+    seen = set()
+
+    def _key(item):
+        text, box = item
+        x1, y1, x2, y2 = box
+        return (
+            normalize_whitespace(text).lower(),
+            int(round(x1 / 6.0)),
+            int(round(y1 / 6.0)),
+            int(round(x2 / 6.0)),
+            int(round(y2 / 6.0)),
+        )
+
+    for item in merged:
+        if isinstance(item, (tuple, list)) and len(item) >= 2:
+            seen.add(_key(item))
+
+    for item in secondary_results or []:
+        if not isinstance(item, (tuple, list)) or len(item) < 2:
+            continue
+        k = _key(item)
+        if k in seen:
+            continue
+        seen.add(k)
+        merged.append(item)
+
+    return merged
+
+
+def score_daily_report_table(reconstructed):
+    """
+    Score reconstructed daily report quality.
+    Higher score means cleaner class rows with stronger payload and less duplication noise.
+    """
+    if not reconstructed or len(reconstructed) < 14:
+        return -1
+
+    class_rows = reconstructed[6:14]
+    score = 0
+    for row in class_rows:
+        if not isinstance(row, list) or len(row) < 9:
+            continue
+
+        teacher = normalize_whitespace(row[1])
+        class_taught = normalize_whitespace(row[4])
+        students = normalize_whitespace(row[5])
+        subject = normalize_whitespace(row[6])
+        activity = normalize_whitespace(row[7])
+
+        payload = sum(1 for token in [teacher, class_taught, students, subject, activity] if token)
+        if payload >= 3:
+            score += 5
+        score += payload
+
+        # Penalize obvious duplicate-word noise like "Sayali Sayali".
+        if teacher:
+            parts = teacher.lower().split()
+            if len(parts) >= 2 and len(set(parts)) == 1:
+                score -= 2
+
+        # Penalize very long activity text in narrow cells (often merged OCR noise).
+        if activity and len(activity.split()) > 5:
+            score -= 2
+
+    return score
+
+
+def merge_horizontal_fragments(ocr_results, overlap_threshold=0.5, gap_threshold=15):
+    """
+    Merge OCR boxes that are horizontally adjacent and on the same line.
+    Useful for "Har" + "sh" -> "Harsh".
+    """
+    if not ocr_results:
+        return []
+
+    # Sort primarily by Y, then X
+    sorted_res = sorted(ocr_results, key=lambda r: (r[1][1], r[1][0]))
+    merged = []
+    
+    if not sorted_res:
+        return []
+        
+    curr_text, curr_box = sorted_res[0]
+    
+    for i in range(1, len(sorted_res)):
+        next_text, next_box = sorted_res[i]
+        
+        # Check vertical overlap
+        v_overlap = min(curr_box[3], next_box[3]) - max(curr_box[1], next_box[1])
+        h_gap = next_box[0] - curr_box[2]
+        
+        curr_h = curr_box[3] - curr_box[1]
+        next_h = next_box[3] - next_box[1]
+        min_h = min(curr_h, next_h)
+        
+        if v_overlap > min_h * overlap_threshold and 0 <= h_gap <= gap_threshold:
+            # Merge them
+            curr_text = f"{curr_text}{next_text}"
+            curr_box = (
+                min(curr_box[0], next_box[0]),
+                min(curr_box[1], next_box[1]),
+                max(curr_box[2], next_box[2]),
+                max(curr_box[3], next_box[3])
+            )
+        else:
+            merged.append((curr_text, curr_box))
+            curr_text, curr_box = next_text, next_box
+            
+    merged.append((curr_text, curr_box))
+    return merged
+
+
+def get_intersection_area(box1, box2):
+    """Intersection of (x1, y1, x2, y2) and (x1, y1, x2, y2)."""
+    ix1 = max(box1[0], box2[0])
+    iy1 = max(box1[1], box2[1])
+    ix2 = min(box1[2], box2[2])
+    iy2 = min(box1[3], box2[3])
+    
+    if ix1 < ix2 and iy1 < iy2:
+        return (ix2 - ix1) * (iy2 - iy1)
+    return 0.0
+
+
 
 def assign_text_to_grid(ocr_results, row_bounds, col_bounds):
     """
-    Map each OCR text result to the correct grid cell based on its center position.
-    Returns a 2D list (rows × cols) of text strings.
+    Map each OCR text result to the correct grid cell based on overlap area.
+    Ensures that text sitting on lines is assigned to the cell with most overlap.
     """
+    # Merge fragments first
+    ocr_results = merge_horizontal_fragments(ocr_results)
+    
     num_rows = len(row_bounds) - 1
     num_cols = len(col_bounds) - 1
 
     # Initialize empty grid
     grid = [["" for _ in range(num_cols)] for _ in range(num_rows)]
 
-    for text, cx, cy in ocr_results:
+    for text, bbox in ocr_results:
         if not text.strip():
             continue
 
-        # Find which row this text belongs to
-        row_idx = -1
+        best_row = -1
+        best_col = -1
+        max_overlap = 0.0
+
         for r in range(num_rows):
-            if row_bounds[r] <= cy <= row_bounds[r + 1]:
-                row_idx = r
-                break
+            for c in range(num_cols):
+                cell_box = (col_bounds[c], row_bounds[r], col_bounds[c+1], row_bounds[r+1])
+                overlap = get_intersection_area(bbox, cell_box)
+                
+                if overlap > max_overlap:
+                    max_overlap = overlap
+                    best_row = r
+                    best_col = c
 
-        # Find which column this text belongs to
-        col_idx = -1
-        for c in range(num_cols):
-            if col_bounds[c] <= cx <= col_bounds[c + 1]:
-                col_idx = c
-                break
+        # Fallback to center-point if no overlap found (e.g. tiny box on the line)
+        if best_row == -1:
+            cx = (bbox[0] + bbox[2]) / 2.0
+            cy = (bbox[1] + bbox[3]) / 2.0
+            for r in range(num_rows):
+                if row_bounds[r] <= cy <= row_bounds[r + 1]:
+                    best_row = r
+                    break
+            for c in range(num_cols):
+                if col_bounds[c] <= cx <= col_bounds[c + 1]:
+                    best_col = c
+                    break
 
-        if row_idx >= 0 and col_idx >= 0:
-            # Append text if cell already has content (rare)
-            if grid[row_idx][col_idx]:
-                grid[row_idx][col_idx] += " " + text
+        if best_row >= 0 and best_col >= 0:
+            if grid[best_row][best_col]:
+                grid[best_row][best_col] += " " + text
             else:
-                grid[row_idx][col_idx] = text
+                grid[best_row][best_col] = text
 
     return grid
 
@@ -716,6 +897,9 @@ def clean_class_token(value):
     token = normalize_whitespace(value)
     if not token:
         return ""
+    lowered_token = token.lower()
+    if lowered_token == "b":
+        return "6th"
     ordinal_match = re.search(r"(\d{1,3})(st|nd|rd|th)?", token, flags=re.IGNORECASE)
     if ordinal_match:
         number = ordinal_match.group(1)
@@ -748,10 +932,44 @@ def clean_numeric_token(value):
     return digits[0] if digits else ""
 
 
+def clean_student_count_token(value):
+    token = normalize_whitespace(value).upper()
+    if not token:
+        return ""
+        
+    replacements = {
+        "E": "3",
+        "B": "8",
+        "S": "5",
+        "O": "0",
+        "G": "6",
+        "T": "7",
+        "Z": "2",
+        "I": "1",
+        "L": "1",
+    }
+    # If the token is just one of these characters
+    if token in replacements:
+        return replacements[token]
+        
+    # Generalized word-level replacement
+    token = token.replace("B", "8").replace("S", "5").replace("O", "0")
+    
+    digits = re.findall(r"\d+", token)
+    if not digits:
+        return ""
+    n = int(digits[0])
+    if 1 <= n <= 80:
+        return str(n)
+    return ""
+
+
 def clean_name_token(value):
     token = normalize_whitespace(value)
+    # Fix common alpha-to-numeric misreads
+    token = token.replace("3", "e").replace("5", "s").replace("0", "o").replace("8", "b").replace("1", "i")
     token = re.sub(r"[^A-Za-z\s.]", "", token)
-    return normalize_whitespace(token)
+    return normalize_whitespace(token).title()
 
 
 def clean_subject_token(value):
@@ -1014,25 +1232,30 @@ def extract_class_rows(table):
             in_time = clean_time_token(padded[2]) or clean_time_token(" ".join(padded[2:4])) or padded[2]
             out_time = clean_time_token(padded[3]) or padded[3]
 
-            remaining = [cell for cell in padded[4:] if cell]
-            class_taught = ""
-            no_of_students = ""
-            subject = ""
-            activity = ""
-            homework = ""
+            # Column-first extraction for better stability on aligned scans.
+            class_taught = clean_class_token(padded[4])
+            no_of_students = clean_student_count_token(padded[5])
+            subject = clean_subject_token(padded[6])
+            activity = clean_activity_token(padded[7])
+            homework = normalize_whitespace(padded[8])
 
-            if remaining:
-                if len(remaining) >= 4 and re.search(r"\d", remaining[1]):
-                    class_taught = clean_class_token(remaining[0])
-                    no_of_students = clean_numeric_token(remaining[1])
-                    subject = clean_subject_token(remaining[2])
-                    activity = normalize_whitespace(remaining[3])
-                    homework = remaining[4] if len(remaining) > 4 else ""
-                else:
-                    no_of_students = clean_numeric_token(remaining[0])
-                    subject = clean_subject_token(remaining[1]) if len(remaining) > 1 else ""
-                    activity = normalize_whitespace(remaining[2]) if len(remaining) > 2 else ""
-                    homework = remaining[3] if len(remaining) > 3 else ""
+            remaining = [cell for cell in padded[4:] if cell]
+            if not class_taught and remaining:
+                class_taught = clean_class_token(remaining[0])
+            if not no_of_students and len(remaining) > 1:
+                no_of_students = clean_student_count_token(remaining[1])
+            if not subject and len(remaining) > 2:
+                subject = clean_subject_token(remaining[2])
+            if not activity and len(remaining) > 3:
+                activity = clean_activity_token(remaining[3])
+
+            # If class cell is noisy like "$14m$" and students is present in next col,
+            # treat class as leading ordinal and keep count from count column.
+            raw_class = normalize_whitespace(padded[4])
+            if raw_class and not class_taught and re.search(r"\d", raw_class):
+                class_taught = clean_class_token(raw_class)
+            if not no_of_students:
+                no_of_students = clean_student_count_token(" ".join([padded[5], padded[4]]))
 
             # Handle common OCR shift: class cell holds student count, and subject+activity spill.
             if not no_of_students and re.fullmatch(r"\d+", normalize_whitespace(class_taught or "")):
@@ -1134,6 +1357,7 @@ def extract_class_rows(table):
 
     # Remove lightweight mis-split rows (e.g. "6 | th" with no real payload).
     filtered_rows = []
+    pending_class_hint = ""
     for row in class_rows:
         teacher = normalize_whitespace(row[1]).lower()
         class_taught = clean_class_token(row[4])
@@ -1145,9 +1369,34 @@ def extract_class_rows(table):
             if normalize_whitespace(token)
         )
         if teacher in {"th", "st", "nd", "rd"} and payload_score <= 3:
+            serial_hint = clean_numeric_token(row[0])
+            if serial_hint:
+                n = int(serial_hint)
+                if 1 <= n <= 12:
+                    if n == 1:
+                        pending_class_hint = "1st"
+                    elif n == 2:
+                        pending_class_hint = "2nd"
+                    elif n == 3:
+                        pending_class_hint = "3rd"
+                    else:
+                        pending_class_hint = f"{n}th"
+            continue
+
+        # Drop ghost artifact rows with no teacher and no meaningful payload.
+        if (
+            not teacher
+            and not normalize_whitespace(row[5])
+            and not normalize_whitespace(row[6])
+            and not normalize_whitespace(row[7])
+            and payload_score <= 3
+        ):
             continue
         row[4] = class_taught
         row[6] = subject
+        if pending_class_hint and not normalize_whitespace(row[4]):
+            row[4] = pending_class_hint
+            pending_class_hint = ""
         filtered_rows.append(row)
     class_rows = filtered_rows[:8]
 
@@ -1346,7 +1595,7 @@ def process_image(image_path):
     segment rows/columns/cells → OCR full image → map to grid →
     validate → reconstruct
     """
-    temp_path = None
+    temp_paths = []
     try:
         # Load image
         image = cv2.imread(image_path)
@@ -1367,8 +1616,8 @@ def process_image(image_path):
                 working_image = image[dy1:dy2, dx1:dx2].copy()
                 with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                     cv2.imwrite(tmp.name, working_image)
-                    temp_path = tmp.name
-                    working_path = temp_path
+                    temp_paths.append(tmp.name)
+                    working_path = tmp.name
 
         img_h, img_w = working_image.shape[:2]
         max_dim = max(img_h, img_w)
@@ -1381,8 +1630,8 @@ def process_image(image_path):
             working_image = cv2.resize(working_image, (new_w, new_h), interpolation=cv2.INTER_AREA)
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                 cv2.imwrite(tmp.name, working_image)
-                temp_path = tmp.name
-                working_path = temp_path
+                temp_paths.append(tmp.name)
+                working_path = tmp.name
 
         # Step 1: Preprocess
         gray = preprocess_image(working_image)
@@ -1402,17 +1651,45 @@ def process_image(image_path):
             row_bounds = find_boundaries(horizontal, axis=1)
             col_bounds = find_boundaries(vertical, axis=0)
 
-        # Step 4: OCR the full image (much better than per-cell OCR)
-        ocr_results_all = ocr_full_image(working_path, use_enhanced_fallback=True)
+        # Step 4: Build OCR-optimized image (deskew + denoise + contrast) and run OCR.
+        ocr_ready = build_ocr_ready_image(working_image)
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            cv2.imwrite(tmp.name, ocr_ready)
+            temp_paths.append(tmp.name)
+            ocr_path = tmp.name
+
+        # OCR on enhanced image improves missing/weak text recall on noisy scans,
+        # while original-image OCR sometimes preserves thin handwritten strokes better.
+        # Merge both to reduce dropped rows.
+        ocr_results_enhanced = ocr_full_image(ocr_path, use_enhanced_fallback=True)
+        ocr_results_original = ocr_full_image(working_path, use_enhanced_fallback=True)
+        ocr_results_all = merge_ocr_results(ocr_results_enhanced, ocr_results_original)
 
         # Daily report forms are more reliable with full-page OCR + template reconstruction.
-        full_text = " ".join(text for text, _, _ in ocr_results_all)
+        # Support both OCR tuple shapes:
+        #   (text, bbox) and legacy (text, cx, cy).
+        text_tokens = []
+        for item in ocr_results_all:
+            if not item:
+                continue
+            if isinstance(item, (list, tuple)):
+                text_tokens.append(str(item[0]))
+        full_text = " ".join(text_tokens)
         if is_daily_report_text(full_text):
-            table = table_from_ocr_results(ocr_results_all, row_threshold=16)
-            table = validate_and_clean(table)
-            table = normalize_columns(table)
-            table = reconstruct_daily_report(table)
-            return table
+            # Evaluate multiple OCR passes and pick the cleanest reconstructed sheet.
+            candidate_results = [ocr_results_original, ocr_results_enhanced, ocr_results_all]
+            best_report = None
+            best_score = -10**9
+            for candidate in candidate_results:
+                candidate_table = table_from_ocr_results(candidate, row_threshold=16)
+                candidate_table = validate_and_clean(candidate_table)
+                candidate_table = normalize_columns(candidate_table)
+                reconstructed = reconstruct_daily_report(candidate_table)
+                score = score_daily_report_table(reconstructed)
+                if score > best_score:
+                    best_score = score
+                    best_report = reconstructed
+            return best_report if best_report is not None else reconstruct_daily_report(normalize_columns(validate_and_clean(table_from_ocr_results(ocr_results_original, row_threshold=16))))
 
         ocr_results = ocr_results_all
         ocr_results = filter_ocr_results_to_bbox(ocr_results, table_bbox)
@@ -1443,7 +1720,7 @@ def process_image(image_path):
 
         return apply_correction_layer(table)
     finally:
-        if temp_path:
+        for temp_path in temp_paths:
             try:
                 os.remove(temp_path)
             except OSError:

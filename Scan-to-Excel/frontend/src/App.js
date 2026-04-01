@@ -1,10 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { motion, useScroll, useSpring, AnimatePresence } from 'framer-motion';
 import Header from './components/Header';
 import UploadSection from './components/UploadSection';
 import ProcessingTimeline from './components/ProcessingTimeline';
 import DocumentPreview from './components/DocumentPreview';
 import ExportSection from './components/ExportSection';
+import FeaturesSection from './components/FeaturesSection';
+import BlogSection from './components/BlogSection';
+import AboutSection from './components/AboutSection';
+import ContactSection from './components/ContactSection';
+import AboutPage from './components/AboutPage';
+import BlogPage from './components/BlogPage';
+import NeuralNetworkBackground from './components/NeuralNetworkBackground';
 import './App.css';
 
 // Port 5000 is occupied by AirTunes on some macOS setups, so backend defaults to 5001.
@@ -17,6 +25,18 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [error, setError] = useState(null);
+
+  const [darkMode, setDarkMode] = useState(true);
+  const [currentPage, setCurrentPage] = useState('home');
+  const [selectedBlogPost, setSelectedBlogPost] = useState(null);
+
+  // Scroll Progress logic
+  const { scrollYProgress } = useScroll();
+  const scaleX = useSpring(scrollYProgress, {
+    stiffness: 100,
+    damping: 30,
+    restDelta: 0.001
+  });
 
   const handleFileSelect = async (selectedFile) => {
     setFile(selectedFile);
@@ -91,45 +111,101 @@ function App() {
     }
   };
 
+  const showBlogPost = (title) => {
+    setSelectedBlogPost(title);
+    setCurrentPage('blog-detail');
+  };
+
   return (
-    <div className="App dark min-h-screen bg-[#0a0a0a] text-white">
-      <Header />
+    <div className={`App ${darkMode ? 'dark text-white' : 'text-gray-900'} min-h-screen transition-colors duration-500 overflow-x-hidden bg-transparent`}>
+      {/* Global AI Neural Network Background */}
+      <NeuralNetworkBackground darkMode={darkMode} />
+      <Header 
+        darkMode={darkMode} 
+        setDarkMode={setDarkMode} 
+        setCurrentPage={setCurrentPage} 
+        currentPage={currentPage}
+        scaleX={scaleX}
+      />
       
-      <main className="pb-24 pt-8">
-        {/* Error Banner */}
-        {error && (
-          <div className="max-w-4xl mx-auto px-6 mb-8">
-            <div className="bg-red-500/10 border border-red-500/50 text-red-200 px-4 py-3 rounded-lg flex items-center shadow-[0_0_15px_rgba(239,68,68,0.2)]">
-              <span className="font-medium">{error}</span>
+      <AnimatePresence mode="wait">
+        {currentPage === 'home' ? (
+          <motion.main 
+             key="home"
+             initial={{ opacity: 0 }}
+             animate={{ opacity: 1 }}
+             exit={{ opacity: 0 }}
+             transition={{ duration: 0.5 }}
+             className="pb-24 pt-8"
+          >
+          {/* Error Banner */}
+          {error && (
+            <div className="max-w-4xl mx-auto px-6 mb-8">
+              <div className="bg-red-500/10 border border-red-500/50 text-red-200 px-4 py-3 rounded-lg flex items-center shadow-[0_0_15px_rgba(239,68,68,0.2)]">
+                <span className="font-medium">{error}</span>
+              </div>
             </div>
+          )}
+
+          <div id="start">
+            <UploadSection onFileSelect={handleFileSelect} darkMode={darkMode} />
           </div>
-        )}
 
-        <UploadSection onFileSelect={handleFileSelect} />
-        
-        {/* Processing Timeline shows during upload and processing */}
-        {(isProcessing || currentStep > 0) && (
-           <ProcessingTimeline currentStep={currentStep} isProcessing={isProcessing} />
-        )}
+          {/* Processing Timeline appears immediately after upload */}
+          {(isProcessing || currentStep > 0) && (
+             <ProcessingTimeline currentStep={currentStep} isProcessing={isProcessing} darkMode={darkMode} />
+          )}
 
-        {/* Data Preview and Correction Section */}
-        {!isProcessing && tableData && (
-          <>
-            <DocumentPreview 
-              file={file} 
-              tableData={tableData} 
-              onDataChange={handleDataChange} 
-            />
-            <ExportSection 
-              onDownload={handleDownload} 
-              isDownloading={isDownloading} 
-            />
-          </>
-        )}
-      </main>
+          {/* Data Preview and Correction Section now also appears after upload area for unified workflow */}
+          {!isProcessing && tableData && (
+            <>
+              <DocumentPreview 
+                file={file} 
+                tableData={tableData} 
+                onDataChange={handleDataChange} 
+                darkMode={darkMode}
+              />
+              <ExportSection 
+                onDownload={handleDownload} 
+                isDownloading={isDownloading} 
+                darkMode={darkMode}
+              />
+            </>
+          )}
+          
+          <div id="features">
+            <FeaturesSection darkMode={darkMode} />
+          </div>
+          
+          <div id="blog">
+            <BlogSection darkMode={darkMode} onShowPost={showBlogPost} />
+          </div>
+          
+          <div id="about">
+            <AboutSection darkMode={darkMode} />
+          </div>
+          
+          <div id="contact">
+            <ContactSection darkMode={darkMode} />
+          </div>
+        </motion.main>
+      ) : currentPage === 'about' ? (
+        <AboutPage 
+          darkMode={darkMode} 
+          setDarkMode={setDarkMode} 
+          onBack={() => setCurrentPage('home')} 
+        />
+      ) : (
+        <BlogPage 
+           postTitle={selectedBlogPost}
+           darkMode={darkMode}
+           onBack={() => setCurrentPage('home')}
+        />
+      )}
+      </AnimatePresence>
 
       {/* Decorative dark mode/neon grid layer fixed in background */}
-      <div className="fixed inset-0 pointer-events-none -z-20 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:4rem_4rem]"></div>
+      <div className="fixed inset-0 pointer-events-none -z-20 bg-[linear-gradient(rgba(255,255,255,0.01)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.01)_1px,transparent_1px)] bg-[size:4rem_4rem]"></div>
     </div>
   );
 }
