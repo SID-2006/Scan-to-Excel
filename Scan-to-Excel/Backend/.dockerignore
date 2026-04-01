@@ -1,0 +1,13 @@
+venv/
+.venv/
+.venv310/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.db
+outputs/
+uploads/
+.DS_Store
+.git/
+.gitignore

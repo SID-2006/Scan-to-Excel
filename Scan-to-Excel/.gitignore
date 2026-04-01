@@ -8,6 +8,8 @@ __pycache__/
 .paddlex/
 .paddleocr/
 .official_models/
+.venv310/
+.venv*/
 
 # Node/React
 node_modules/
