@@ -32,6 +32,28 @@ const AboutSection = ({ darkMode }) => {
             Born from the need to eliminate manual data entry, Scan-to-Excel combines state-of-the-art OCR with intelligent layout analysis to give you precise control over your physical data.
           </motion.p>
 
+          {/* Community Contribution & Contributors */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.15 }}
+            className={`p-8 rounded-3xl border mb-12 max-w-xl ${darkMode ? 'bg-white/[0.03] border-white/5' : 'bg-gray-50 border-gray-100'}`}
+          >
+            <h4 className={`text-xs font-bold uppercase tracking-[0.2em] mb-3 ${darkMode ? 'text-blue-400' : 'text-blue-600'}`}>Community Contribution</h4>
+            <p className={`text-sm font-light mb-8 leading-relaxed ${darkMode ? 'text-white/40' : 'text-gray-500'}`}>
+              Developed as part of a community engagement program to build impactful solutions that improve efficiency and accessibility.
+            </p>
+            <div className="space-y-4">
+              <span className={`text-[10px] uppercase tracking-widest font-black ${darkMode ? 'text-white/20' : 'text-gray-400'}`}>Contributors:</span>
+              <div className="flex flex-wrap gap-x-6 gap-y-2">
+                {['Siddhant Wadher', 'Nikhil Agrawal', 'Priyansh Agrawal'].map((name, i) => (
+                  <span key={i} className={`text-sm font-bold ${darkMode ? 'text-white/80' : 'text-gray-900'} relative after:absolute after:bottom-0 after:left-0 after:w-full after:h-px after:bg-blue-500/20`}>{name}</span>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+
           <div className="space-y-8">
             <motion.div
               initial={{ opacity: 0, y: 20 }}

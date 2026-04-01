@@ -13,6 +13,7 @@ import ContactSection from './components/ContactSection';
 import AboutPage from './components/AboutPage';
 import BlogPage from './components/BlogPage';
 import NeuralNetworkBackground from './components/NeuralNetworkBackground';
+import Footer from './components/Footer';
 import './App.css';
 
 // Port 5000 is occupied by AirTunes on some macOS setups, so backend defaults to 5001.
@@ -212,7 +213,7 @@ function App() {
         <AboutPage 
           darkMode={darkMode} 
           setDarkMode={setDarkMode} 
-          onBack={() => setCurrentPage('home')} 
+          onBack={resetApp} 
         />
       ) : (
         <BlogPage 
@@ -222,6 +223,11 @@ function App() {
         />
       )}
       </AnimatePresence>
+      <Footer 
+        darkMode={darkMode} 
+        setCurrentPage={setCurrentPage} 
+        onReset={resetApp} 
+      />
 
       {/* Decorative dark mode/neon grid layer fixed in background */}
       <div className="fixed inset-0 pointer-events-none -z-20 bg-[linear-gradient(rgba(255,255,255,0.01)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.01)_1px,transparent_1px)] bg-[size:4rem_4rem]"></div>
