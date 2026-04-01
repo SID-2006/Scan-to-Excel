@@ -69,10 +69,18 @@ const ContactSection = ({ darkMode }) => {
               <h3 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Email Us</h3>
             </div>
 
-            <div className="space-y-2">
-              <p className={`text-lg font-medium transition-colors ${darkMode ? 'text-white/80 hover:text-blue-400' : 'text-gray-800 hover:text-blue-600'} cursor-pointer`}>
-                24wadhers@rbunagpur.in
-              </p>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <p className={`text-md font-medium transition-colors ${darkMode ? 'text-white/80 hover:text-blue-400' : 'text-gray-800 hover:text-blue-600'} cursor-pointer`}>
+                  24wadhers@rbunagpur.in
+                </p>
+                <p className={`text-md font-medium transition-colors ${darkMode ? 'text-white/80 hover:text-blue-400' : 'text-gray-800 hover:text-blue-600'} cursor-pointer`}>
+                  24agrawaln_3@rbunagpur.in
+                </p>
+                <p className={`text-md font-medium transition-colors ${darkMode ? 'text-white/80 hover:text-blue-400' : 'text-gray-800 hover:text-blue-600'} cursor-pointer`}>
+                  24agrawalp_2@rbunagpur.in
+                </p>
+              </div>
               <p className={`text-sm font-light ${darkMode ? 'text-white/30' : 'text-gray-400'}`}>Response time: Usually within 24 hours</p>
             </div>
 

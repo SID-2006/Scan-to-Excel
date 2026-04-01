@@ -6,8 +6,8 @@ const BlogSection = ({ darkMode, onShowPost }) => {
   const posts = [
     {
       category: "TUTORIAL",
-      title: "How to Convert Scanned PDFs to Excel Automatically",
-      description: "Learn how modern AI OCR technology can transform your blurry scanned reports into clean, structured spreadsheets in seconds.",
+      title: "From Paper to Structured Data in Seconds",
+      description: "Discover how modern AI-powered OCR systems convert messy scanned documents into clean, structured spreadsheets. Learn how accuracy, speed, and automation come together to eliminate manual work.",
       icon: <FileText className="w-6 h-6 text-blue-400" />,
       colorClass: "text-blue-400",
       bgClass: "bg-blue-500/10",
@@ -15,8 +15,8 @@ const BlogSection = ({ darkMode, onShowPost }) => {
     },
     {
       category: "INSIGHTS",
-      title: "Barcode Scanning to Excel",
-      description: "Inventory management is being revolutionized by high-speed barcode integration. Learn how to transform your smartphone camera into a powerful data entry tool.",
+      title: "Building Smart Document Processing Pipelines",
+      description: "Explore how intelligent pipelines combine OCR, validation, and data structuring to deliver production-ready outputs. A deep dive into scalable document automation systems.",
       icon: <Zap className="w-6 h-6 text-purple-400" />,
       colorClass: "text-purple-400",
       bgClass: "bg-purple-500/10",
@@ -24,8 +24,8 @@ const BlogSection = ({ darkMode, onShowPost }) => {
     },
     {
       category: "SECURITY",
-      title: "Data Security in Cloud-Based OCR Systems",
-      description: "Your privacy matters. We break down the encryption and security measures taken to protect your sensitive documents.",
+      title: "Ensuring Accuracy in Automated Data Extraction",
+      description: "Learn the techniques behind high-precision data extraction, including error correction, validation layers, and AI-assisted cleanup for reliable results.",
       icon: <Shield className="w-6 h-6 text-green-400" />,
       colorClass: "text-green-400",
       bgClass: "bg-green-500/10",
@@ -43,7 +43,7 @@ const BlogSection = ({ darkMode, onShowPost }) => {
             viewport={{ once: true }}
             className={`text-4xl md:text-5xl font-bold mb-6 tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'}`}
           >
-            Insights & <span className="text-blue-500">Guides</span>
+            Knowledge <span className="text-blue-500">Hub</span>
           </motion.h2>
           <motion.p
             initial={{ opacity: 0, y: 20 }}

@@ -3,123 +3,208 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, Clock, User, Share2, Tag, ChevronRight } from 'lucide-react';
 
 const blogPostContent = {
-  "How to Convert Scanned PDFs to Excel Automatically": {
+  "From Paper to Structured Data in Seconds": {
     category: "Tutorial",
-    date: "March 28, 2026",
+    date: "April 02, 2026",
+    author: "Scan-to-Excel Team",
     readTime: "8 min read",
     content: (
-      <div className="space-y-8 leading-relaxed font-light">
+      <div className="space-y-10 leading-relaxed font-light">
         <p className="text-xl leading-relaxed italic border-l-4 border-blue-500 pl-6 py-4 bg-blue-500/5 rounded-r-xl">
-          Scaling businesses today require moving away from manual data entry. Discover how modern AI-powered OCR technology can convert thousands of scanned PDFs into accurate Excel sheets in record time.
+          In today’s data-driven world, a large portion of valuable information still exists in physical formats — invoices, reports, forms, and handwritten records. Manually converting this data into digital systems is not only time-consuming but also highly error-prone.
         </p>
 
-        <h3 className="text-3xl font-bold tracking-tight">Step 1: Intelligent Image Pre-processing</h3>
-        <p>
-          The success of OCR starts long before character recognition. To handle blurry scans or slanted images, we apply grayscale normalization, noise reduction filters, and deskewing algorithms. This "cleans" the digital snapshot for the AI to see clearly.
-        </p>
+        <section>
+          <h3 className="text-3xl font-bold tracking-tight mb-4">The Problem</h3>
+          <p className="mb-4">Manual data entry faces significant hurdles that impact business efficiency:</p>
+          <ul className="space-y-3 list-none">
+            {['Increased operational costs', 'Slower workflows', 'Higher chances of human error'].map((item, i) => (
+              <li key={i} className="flex items-center gap-3">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-500" /> {item}
+              </li>
+            ))}
+          </ul>
+        </section>
 
-        <h3 className="text-3xl font-bold tracking-tight">Step 2: Table & Structure Recognition</h3>
-        <p>
-          Traditional OCR treats everything as a flat wall of text. We use deep learning models to identify "Regions of Interest" (ROI)—specifically targeting grid patterns and cell boundaries. This determines the logical structure of your document.
-        </p>
+        <section>
+          <h3 className="text-3xl font-bold tracking-tight mb-4">The Solution: AI-Powered OCR</h3>
+          <p>
+            Modern OCR systems use artificial intelligence to detect text, understand document structure, and extract tabular data accurately. Unlike legacy systems, AI recognizes patterns and context.
+          </p>
+        </section>
 
-        <div className="p-8 rounded-3xl bg-white/5 border border-white/10">
-          <h4 className="font-bold mb-4">Pro Tip: DPI Matters</h4>
-          <p className="text-sm">For maximum accuracy, ensure your scans are at least 300 DPI. This provides enough resolution for our neural network to distinguish between similar characters like 'B' and '8'.</p>
-        </div>
+        <section>
+          <h3 className="text-3xl font-bold tracking-tight mb-4">How It Works</h3>
+          <ol className="space-y-4 list-none counter-reset-steps">
+            {[
+              'Image is uploaded via a secure interface',
+              'Preprocessing filters improve image clarity and contrast',
+              'The OCR engine extracts raw text line by line',
+              'AI detects tables, columns, and logical structure',
+              'Data is formatted into structured spreadsheets'
+            ].map((step, i) => (
+              <li key={i} className="flex gap-4">
+                <span className="font-bold text-blue-500">{i + 1}.</span>
+                <span>{step}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
 
-        <h3 className="text-3xl font-bold tracking-tight">Step 3: Neural Character Extraction</h3>
-        <p>
-          Once the cells are mapped, each individual segment is passed through a multi-lingual OCR engine. This handles complex fonts, handwriting variants, and even low-contrast ink.
-        </p>
+        <section className="p-8 rounded-3xl bg-blue-500/5 border border-blue-500/10">
+          <h3 className="text-2xl font-bold mb-4">Key Benefits</h3>
+          <ul className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {['Faster processing', 'High accuracy', 'Structured output', 'Cost Reduction'].map((benefit, i) => (
+              <li key={i} className="flex items-center gap-3">
+                <div className="w-5 h-5 rounded-md bg-blue-500/20 flex items-center justify-center text-[10px] text-blue-500 font-bold">✓</div>
+                {benefit}
+              </li>
+            ))}
+          </ul>
+        </section>
 
-        <h3 className="text-3xl font-bold tracking-tight">Step 4: CSV/XLSX Mapping</h3>
-        <p>
-          Finally, the extracted data is mapped back into the identified grid structure. We apply post-extraction cleanup to correct common errors (like currency symbols or date formats) before compiling it into a downloadable Excel file.
+        <p className="text-lg font-medium text-blue-400">
+          Conclusion: AI-powered OCR transforms static documents into actionable data instantly.
         </p>
       </div>
     )
   },
-  "Barcode Scanning to Excel": {
+  "Building Smart Document Processing Pipelines": {
     category: "Insights",
-    date: "March 30, 2026",
-    author: "UPAY AI Team",
-    readTime: "6 min read",
+    date: "April 03, 2026",
+    author: "Pipeline Architects",
+    readTime: "12 min read",
     content: (
-      <div className="space-y-8 leading-relaxed font-light">
+      <div className="space-y-10 leading-relaxed font-light">
         <p className="text-xl leading-relaxed italic border-l-4 border-purple-500 pl-6 py-4 bg-purple-500/5 rounded-r-xl">
-          Inventory management is being revolutionized by high-speed barcode integration. Learn how to transform your smartphone camera into a powerful data entry tool.
+          Extracting data is only one part of the process. Production-level systems require complete pipelines to ensure accuracy, consistency, and scalability.
         </p>
 
-        <h3 className="text-3xl font-bold tracking-tight">The Power of Batch Scanning</h3>
-        <p>
-          In warehouses and retail environments, scanning one barcode at a time is the old way. Advanced computer vision now allows for "Multi-Scan" technology, where a single scan can identify and record dozens of unique SKU tags from a single pallet.
-        </p>
+        <section>
+          <h3 className="text-3xl font-bold tracking-tight mb-4">What is a Document Pipeline?</h3>
+          <p>
+            A document processing pipeline is a sequence of automated steps that transforms raw input—like a photo of an invoice—into structured output ready for database ingestion or manual analysis.
+          </p>
+        </section>
 
-        <h3 className="text-3xl font-bold tracking-tight">Data Integrity and Real-time Sync</h3>
-        <p>
-          The core challenge isn't the scan—it's the destination. We explore how to sync scanned data instantly with centralized Excel sheets via cloud APIs, ensuring your inventory levels are accurate to the second.
-        </p>
+        <section className="space-y-8">
+          <h3 className="text-3xl font-bold tracking-tight">Core Components</h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="space-y-2">
+              <h4 className="text-xl font-bold text-purple-400">1. Input Handling</h4>
+              <p className="text-sm">Comprehensive support for varied image formats and multi-page PDFs.</p>
+            </div>
+            
+            <div className="space-y-2">
+              <h4 className="text-xl font-bold text-purple-400">2. Preprocessing</h4>
+              <ul className="text-sm space-y-1 opacity-70">
+                <li>• Noise reduction</li>
+                <li>• Image enhancement</li>
+                <li>• Alignment correction</li>
+              </ul>
+            </div>
+            
+            <div className="space-y-2">
+              <h4 className="text-xl font-bold text-purple-400">3. OCR Engine</h4>
+              <p className="text-sm">The heavy lifting: converting pixels into machine-readable characters.</p>
+            </div>
+            
+            <div className="space-y-2">
+              <h4 className="text-xl font-bold text-purple-400">4. Structure Detection</h4>
+              <p className="text-sm">Identifying the visual grammar of the document: headers, footers, and cells.</p>
+            </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="p-6 rounded-2xl bg-purple-500/10 border border-purple-500/20">
-            <h5 className="font-bold mb-2 uppercase text-xs tracking-widest text-purple-400">1D Barcodes</h5>
-            <p className="text-sm">UPC, EAN, and Code 128 - best for basic product tracking.</p>
+            <div className="space-y-2">
+              <h4 className="text-xl font-bold text-purple-400">5. Data Validation</h4>
+              <p className="text-sm">Automated logic to detect missing values and ensure financial consistency.</p>
+            </div>
+
+            <div className="space-y-2">
+              <h4 className="text-xl font-bold text-purple-400">6. Output Generation</h4>
+              <p className="text-sm">Compiling clean, validated data into production-ready Excel files.</p>
+            </div>
           </div>
-          <div className="p-6 rounded-2xl bg-blue-500/10 border border-blue-500/20">
-            <h5 className="font-bold mb-2 uppercase text-xs tracking-widest text-blue-400">2D Matrix</h5>
-            <p className="text-sm">QR Codes and Data Matrix - can store complex metadata like URLs or expiration dates.</p>
-          </div>
-        </div>
+        </section>
 
-        <h3 className="text-3xl font-bold tracking-tight">Automated Reporting</h3>
-        <p>
-          Learn how to use Excel macros to take your barcode data and generate automated restock alerts and category-wise distributions without lifting a finger.
+        <section className="p-8 rounded-[2rem] bg-purple-500/5 border border-purple-500/10">
+          <h3 className="text-2xl font-bold mb-4">Why It Matters</h3>
+          <ul className="space-y-3">
+             <li className="flex gap-4">
+                <span className="text-purple-500 font-bold">»</span> Enables scalability across thousands of documents.
+             </li>
+             <li className="flex gap-4">
+                <span className="text-purple-500 font-bold">»</span> Drastically improves final accuracy through multi-layer validation.
+             </li>
+             <li className="flex gap-4">
+                <span className="text-purple-500 font-bold">»</span> Automates repetitive manual workflows.
+             </li>
+          </ul>
+        </section>
+
+        <p className="text-lg font-medium text-purple-400">
+          Conclusion: Smart pipelines enable reliable and scalable document automation.
         </p>
       </div>
     )
   },
-  "Data Security in Cloud-Based OCR Systems": {
+  "Ensuring Accuracy in Automated Data Extraction": {
     category: "Security",
-    date: "April 01, 2026",
-    author: "Safety First",
+    date: "April 04, 2026",
+    author: "OCR Experts",
     readTime: "10 min read",
     content: (
-      <div className="space-y-8 leading-relaxed font-light">
+      <div className="space-y-10 leading-relaxed font-light">
         <p className="text-xl leading-relaxed italic border-l-4 border-green-500 pl-6 py-4 bg-green-500/5 rounded-r-xl">
-          Privacy isn't a feature; it's a fundamental right. In the world of OCR, where sensitive financial and medical records are processed, security architecture is everything.
+          Accuracy is critical in automated data extraction. Even small errors can lead to major issues in financial reporting and operations.
         </p>
 
-        <h3 className="text-3xl font-bold tracking-tight">Transient Processing Architecture</h3>
-        <p>
-          Unlike traditional systems that store your documents "just in case," our cloud-based engine utilizes transient memory. This means the moment your Excel file is generated, the original scan is wiped from RAM. No long-term storage, No footprint.
-        </p>
+        <section>
+          <h3 className="text-3xl font-bold tracking-tight mb-4">The Challenges</h3>
+          <div className="flex flex-wrap gap-3">
+            {['Poor image quality', 'Handwritten text', 'Complex layouts', 'Multiple languages'].map((tag, i) => (
+              <span key={i} className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-medium">{tag}</span>
+            ))}
+          </div>
+        </section>
 
-        <h3 className="text-3xl font-bold tracking-tight">End-to-End Encryption (E2EE)</h3>
-        <p>
-          We utilize AES-256 bit encryption at rest and TLS 1.3 for data in transit. This ensures that even if data was intercepted, it would remain completely unreadable to unauthorized parties.
-        </p>
+        <section className="space-y-6">
+          <h3 className="text-3xl font-bold tracking-tight">Techniques to Improve Accuracy</h3>
+          
+          <div className="space-y-4">
+            <div className="p-6 rounded-2xl bg-green-500/5 border border-green-500/10">
+              <h4 className="text-lg font-bold text-green-400 mb-2">Image Preprocessing</h4>
+              <p className="text-sm">Enhancing clarity before OCR through adaptive thresholding and contrast boosting.</p>
+            </div>
+            
+            <div className="p-6 rounded-2xl bg-green-500/5 border border-green-500/10">
+              <h4 className="text-lg font-bold text-green-400 mb-2">AI-Based Correction</h4>
+              <p className="text-sm">Fixing common OCR substitution errors and predicting missing values using language models.</p>
+            </div>
+            
+            <div className="p-6 rounded-2xl bg-green-500/5 border border-green-500/10">
+              <h4 className="text-lg font-bold text-green-400 mb-2">Validation Layers</h4>
+              <p className="text-sm">Applying rigorous format validation and proactive duplicate detection.</p>
+            </div>
 
-        <div className="p-8 rounded-[2rem] bg-green-500/5 border border-green-500/20">
-          <ul className="space-y-4">
-            <li className="flex items-center gap-4">
-              <div className="w-2 h-2 rounded-full bg-green-400"></div>
-              <span>GDPR Compliance for European data handling.</span>
-            </li>
-            <li className="flex items-center gap-4">
-              <div className="w-2 h-2 rounded-full bg-green-400"></div>
-              <span>SOC2 Audited cloud infrastructure.</span>
-            </li>
-            <li className="flex items-center gap-4">
-              <div className="w-2 h-2 rounded-full bg-green-400"></div>
-              <span>Monthly third-party penetration testing.</span>
-            </li>
+            <div className="p-6 rounded-2xl bg-green-500/5 border border-green-500/10">
+              <h4 className="text-lg font-bold text-green-400 mb-2">Human-in-the-Loop</h4>
+              <p className="text-sm">Optional manual review for low-confidence results to ensure 100% integrity.</p>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h3 className="text-3xl font-bold tracking-tight mb-4">Best Practices</h3>
+          <ul className="space-y-2">
+            <li>• Use high-quality inputs (300+ DPI) whenever possible.</li>
+            <li>• Always combine OCR with a post-processing AI layer.</li>
+            <li>• Apply customized validation rules matching your data schema.</li>
           </ul>
-        </div>
+        </section>
 
-        <h3 className="text-3xl font-bold tracking-tight">Access Control & Auditing</h3>
-        <p>
-          Who can see the data? In our ecosystem, the answer is "Only You." We dive into the protocols that restrict server access and how we maintain rigorous audit logs for system activity.
+        <p className="text-lg font-medium text-green-400">
+          Conclusion: High accuracy requires intelligent processing and validation.
         </p>
       </div>
     )
