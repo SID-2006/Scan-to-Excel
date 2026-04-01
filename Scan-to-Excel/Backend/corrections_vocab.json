@@ -1,0 +1,21 @@
+{
+  "subject_aliases": {
+    "m4th": "Math",
+    "englsh": "English",
+    "scince": "Science",
+    "geographi": "Geography",
+    "histroy": "History",
+    "drwing": "Drawing",
+    "evs": "EVS",
+    "computer sci": "Computer Science"
+  },
+  "activity_aliases": {
+    "h0mework": "Homework",
+    "lectur": "Lecture",
+    "prctical": "Practical",
+    "clas tst": "Class Test",
+    "wrk sheet": "Worksheet",
+    "project wrk": "Project Work",
+    "revsion": "Revision"
+  }
+}

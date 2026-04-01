@@ -32,6 +32,23 @@ def _normalize_generic(text: str) -> str:
     return text
 
 
+def _handle_handwritten_numeric(value: str) -> str:
+    original = value.strip().upper()
+    if not original:
+        return ""
+        
+    replacements = {
+        "E": "3", "B": "8", "S": "5", "O": "0", "G": "6",
+        "T": "7", "Z": "2", "I": "1", "L": "1"
+    }
+    # Direct replacement for single character misreads
+    if original in replacements:
+        return replacements[original]
+    
+    # Generic numbers-only logic
+    return re.sub(r"[^\d]", "", original.replace("B", "8").replace("S", "5").replace("O", "0"))
+
+
 def _normalize_for_column(text: str, column_name: str) -> str:
     lower = column_name.lower()
     value = _normalize_generic(text)
@@ -41,7 +58,11 @@ def _normalize_for_column(text: str, column_name: str) -> str:
         value = value.replace("O", "0").replace("o", "0")
         value = re.sub(r"\s+", "", value)
     elif "students" in lower or "count" in lower:
-        value = re.sub(r"[^\d]", "", value) or value
+        value = _handle_handwritten_numeric(value) or value
+    elif "teacher" in lower or "name" in lower:
+        # Restore alphabetic characters that might have been read as numbers
+        value = value.replace("3", "e").replace("5", "s").replace("0", "o").replace("8", "b").replace("1", "i")
+        value = re.sub(r"[^A-Za-z\s.]", "", value).strip().title()
     elif "subject" in lower:
         value = re.sub(r"[^A-Za-z\s]", "", value)
         value = re.sub(r"\s+", " ", value).strip()

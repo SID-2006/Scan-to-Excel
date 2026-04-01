@@ -48,7 +48,28 @@ def _parse_time(text: str) -> Optional[str]:
 
 
 def _parse_student_count(text: str, cfg) -> Optional[str]:
-    digits = re.findall(r"\d+", text or "")
+    if not text:
+        return None
+    
+    # Pre-clean common handwritten-to-alpha misreads in numeric col
+    token = text.upper().strip()
+    replacements = {
+        "E": "3",
+        "B": "8",
+        "S": "5",
+        "O": "0",
+        "G": "6",
+        "T": "7",
+        "Z": "2",
+        "I": "1",
+        "L": "1",
+    }
+    for char, digit in replacements.items():
+        if token == char:
+            token = digit
+            break
+            
+    digits = re.findall(r"\d+", token)
     if not digits:
         return None
     value = int(digits[0])
