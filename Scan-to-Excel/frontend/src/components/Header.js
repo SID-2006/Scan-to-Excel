@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { ScanLine, Info, ChevronRight, Sun, Moon, Layout, Mail, FileText, Rocket, BookOpen } from 'lucide-react';
 
-const Header = ({ darkMode, setDarkMode, setCurrentPage, currentPage, scaleX }) => {
+const Header = ({ darkMode, setDarkMode, setCurrentPage, currentPage, scaleX, onReset }) => {
   const [activeSection, setActiveSection] = React.useState('');
 
   const navItems = [
@@ -47,6 +47,9 @@ const Header = ({ darkMode, setDarkMode, setCurrentPage, currentPage, scaleX }) 
       setCurrentPage('about');
       setActiveSection('about');
       window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (text === "Start") {
+      e.preventDefault();
+      onReset();
     } else if (target.startsWith('#')) {
       e.preventDefault();
       setActiveSection(target);
@@ -88,7 +91,7 @@ const Header = ({ darkMode, setDarkMode, setCurrentPage, currentPage, scaleX }) 
   return (
     <div className="relative">
       <header className={`w-full fixed top-0 left-0 z-50 transition-all duration-500 ${
-        darkMode ? 'bg-[#0a0a0a]/80 border-b border-white/5' : 'bg-white/80 border-b border-gray-100'
+        darkMode ? 'bg-[#02040a]/40 border-b border-white/5' : 'bg-white/80 border-b border-gray-100'
       } backdrop-blur-xl shadow-lg`}>
         {/* Integrated Scroll Progress Loading Bar */}
         <motion.div
@@ -180,7 +183,7 @@ const Header = ({ darkMode, setDarkMode, setCurrentPage, currentPage, scaleX }) 
 
       {/* Hero Content (Only Home) - Added mt-20 to clear fixed header */}
       {currentPage === 'home' && (
-        <div className="relative pt-48 pb-20 text-center overflow-hidden z-10">
+        <div className="relative pt-48 pb-20 text-center z-10">
           {/* Animated Background Glow */}
           <motion.div 
             animate={{ 
@@ -218,7 +221,7 @@ const Header = ({ darkMode, setDarkMode, setCurrentPage, currentPage, scaleX }) 
             className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-10"
           >
             <button
-              onClick={() => document.querySelector('#start')?.scrollIntoView({ behavior: 'smooth' })}
+              onClick={onReset}
               className="group relative w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-[#00f0ff] to-[#bb86fc] rounded-full font-bold text-lg text-white shadow-[0_0_20px_rgba(0,240,255,0.3)] hover:shadow-[0_0_30px_rgba(0,240,255,0.5)] transition-all flex items-center justify-center gap-3 overflow-hidden active:scale-95"
             >
               <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>

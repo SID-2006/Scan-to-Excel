@@ -116,6 +116,24 @@ function App() {
     setCurrentPage('blog-detail');
   };
 
+  const resetApp = () => {
+    setFile(null);
+    setTableData(null);
+    setCurrentStep(0);
+    setIsProcessing(false);
+    setIsDownloading(false);
+    setError(null);
+    setCurrentPage('home');
+    setSelectedBlogPost(null);
+    
+    setTimeout(() => {
+      const element = document.getElementById('start');
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 10);
+  };
+
   return (
     <div className={`App ${darkMode ? 'dark text-white' : 'text-gray-900'} min-h-screen transition-colors duration-500 overflow-x-hidden bg-transparent`}>
       {/* Global AI Neural Network Background */}
@@ -126,6 +144,7 @@ function App() {
         setCurrentPage={setCurrentPage} 
         currentPage={currentPage}
         scaleX={scaleX}
+        onReset={resetApp}
       />
       
       <AnimatePresence mode="wait">
