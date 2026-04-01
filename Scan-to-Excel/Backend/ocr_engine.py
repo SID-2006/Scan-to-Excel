@@ -609,10 +609,31 @@ def assign_text_to_grid(ocr_results, row_bounds, col_bounds):
                     break
 
         if best_row >= 0 and best_col >= 0:
-            if grid[best_row][best_col]:
-                grid[best_row][best_col] += " " + text
+            new_text = text.strip()
+            if not new_text:
+                continue
+                
+            existing = grid[best_row][best_col]
+            if existing:
+                # Advanced word-level de-duplication
+                existing_words = set(w.lower() for w in existing.split())
+                new_words = new_text.split()
+                
+                # Keep only words that don't exist in this cell yet
+                unique_new_words = []
+                for w in new_words:
+                    clean_w = w.lower().strip(".,:;()[]{}")
+                    if clean_w and clean_w not in existing_words:
+                        unique_new_words.append(w)
+                        existing_words.add(clean_w)
+                
+                if not unique_new_words:
+                    continue
+                    
+                added_text = " ".join(unique_new_words)
+                grid[best_row][best_col] = f"{existing} {added_text}"
             else:
-                grid[best_row][best_col] = text
+                grid[best_row][best_col] = new_text
 
     return grid
 
@@ -969,7 +990,25 @@ def clean_name_token(value):
     # Fix common alpha-to-numeric misreads
     token = token.replace("3", "e").replace("5", "s").replace("0", "o").replace("8", "b").replace("1", "i")
     token = re.sub(r"[^A-Za-z\s.]", "", token)
-    return normalize_whitespace(token).title()
+    token = normalize_whitespace(token).title()
+    if not token:
+        return ""
+
+    parts = token.split()
+    deduped = []
+    seen = set()
+    for part in parts:
+        key = part.lower()
+        # Drop repeated noise tokens while preserving first valid occurrence.
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(part)
+
+    cleaned = " ".join(deduped).strip()
+    if len(cleaned) <= 1:
+        return ""
+    return cleaned
 
 
 def clean_subject_token(value):
@@ -1010,6 +1049,30 @@ def clean_activity_token(value):
     token = token.replace("Wreading", "Wo Reading")
     token = token.replace("classroom", "Classroom")
     token = re.sub(r"\s+", " ", token).strip()
+
+    # Remove obvious OCR junk in activity cells (standalone digits/noise fragments).
+    raw_parts = token.split()
+    filtered_parts = []
+    for part in raw_parts:
+        lowered = part.lower()
+        if re.fullmatch(r"\d+", part):
+            continue
+        if len(part) == 1 and lowered not in {"y", "n"}:
+            continue
+        filtered_parts.append(part)
+
+    # Collapse repeated words to avoid "Maathi Maathi ..." style duplication.
+    deduped_parts = []
+    seen = set()
+    for part in filtered_parts:
+        key = re.sub(r"[^a-z]", "", part.lower())
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        deduped_parts.append(part)
+
+    token = " ".join(deduped_parts).strip()
     if token in {"a", "-11-", "--"}:
         return ""
     return token
