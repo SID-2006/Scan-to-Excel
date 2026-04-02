@@ -841,6 +841,121 @@ def repair_generic_table_structure(table):
     return normalize_columns(cleaned)
 
 
+def _looks_like_species_weight_table(table):
+    """Detect 5-col wildlife capture table: Date collected | Plot | Species | Sex | Weight."""
+    if not table:
+        return False
+    header_rows = table[:2] if len(table) > 1 else table[:1]
+    header = " ".join(
+        normalize_whitespace(c).lower()
+        for row in header_rows
+        for c in (row or [])
+        if c
+    )
+    required = ["date", "plot", "species", "sex", "weight"]
+    if all(token in header for token in required):
+        return True
+
+    # Fallback: infer by row-shape when header OCR is noisy/misaligned.
+    species_vocab = {"DM", "DS", "DO", "PF", "PP", "PB", "RM", "RO", "BA"}
+    signal_rows = 0
+    for row in table:
+        row_text = normalize_whitespace(" ".join(str(v or "") for v in row))
+        if not row_text:
+            continue
+        has_date = bool(re.search(r"\b\d{1,2}/\d{1,2}/\d{2,4}\b", row_text))
+        has_weight = bool(re.search(r"\b\d{2,3}\b", row_text))
+        has_sex = bool(re.search(r"\b[MF]\b", row_text.upper()))
+        has_species = any(code in row_text.upper() for code in species_vocab)
+        if has_date and has_weight and has_sex and has_species:
+            signal_rows += 1
+
+    return signal_rows >= 3
+
+
+def _extract_first(pattern, text):
+    match = re.search(pattern, text or "", flags=re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
+def _repair_species_weight_table(table):
+    """
+    Recover common OCR row-mixing for a 5-column species table.
+    Keeps output shape strict to: Date collected, Plot, Species, Sex, Weight.
+    """
+    if not table:
+        return table
+
+    fixed = [["Date collected", "Plot", "Species", "Sex", "Weight"]]
+    species_vocab = {"DM", "DS", "DO", "PF", "PP", "PB", "RM", "RO", "BA"}
+
+    for raw_row in table[1:]:
+        row = list(raw_row or [])
+        while len(row) < 5:
+            row.append("")
+        row_text = normalize_whitespace(" ".join(str(v or "") for v in row[:5]))
+        if not row_text:
+            continue
+
+        # Skip duplicate header-like lines that leak into OCR rows.
+        row_l = row_text.lower()
+        if row_l.count("plot") and row_l.count("species") and row_l.count("sex"):
+            continue
+
+        date_value = _extract_first(r"(\d{1,2}/\d{1,2}/\d{2,4})", row_text)
+        if not date_value:
+            # No date signal => usually non-data noise row.
+            continue
+
+        # Weight: choose trailing 2-3 digit integer.
+        weight_candidates = re.findall(r"\b(\d{2,3})\b", row_text)
+        weight_value = weight_candidates[-1] if weight_candidates else ""
+
+        # Species: prefer the last species token in the row (handles mixed tokens like "DM ... 2DS").
+        species_matches = re.findall(r"\b([A-Za-z]{2,3})\b", row_text.upper())
+        species_tokens = [tok for tok in species_matches if tok in species_vocab]
+        species_value = species_tokens[-1] if species_tokens else ""
+
+        # Plot: strongest signal is compact/adjacent "<digit><species>" or "<digit> <species>".
+        compact_pairs = re.findall(r"\b(\d{1,2})\s*([A-Za-z]{2,3})\b", row_text.upper())
+        compact_pairs = [(p, s) for p, s in compact_pairs if s in species_vocab]
+        plot_value = ""
+        if compact_pairs:
+            if species_value:
+                same_species = [p for p, s in compact_pairs if s == species_value]
+                if same_species:
+                    plot_value = same_species[-1]
+            if not plot_value:
+                plot_value = compact_pairs[-1][0]
+
+        # Fallback: explicit numeric from Plot column.
+        if not plot_value:
+            plot_value = _extract_first(r"\b(\d{1,2})\b", normalize_whitespace(str(row[1])))
+
+        # Final fallback from whole row numbers, excluding obvious weight.
+        if not plot_value:
+            nums = re.findall(r"\b(\d{1,3})\b", row_text)
+            for n in nums:
+                if n != weight_value and int(n) <= 12:
+                    plot_value = n
+                    break
+
+        # Sex: use last M/F token from row for stability when noise introduces extra letters.
+        sex_tokens = re.findall(r"\b([MF])\b", row_text.upper())
+        sex_value = sex_tokens[-1] if sex_tokens else ""
+
+        # Filter weak rows that still have no meaningful extracted content.
+        populated = [date_value, plot_value, species_value, sex_value, weight_value]
+        if not any(populated):
+            continue
+
+        # Keep only rows that are structurally complete enough to be meaningful.
+        if date_value and species_value and sex_value and weight_value:
+            fixed.append(populated)
+
+    return fixed if len(fixed) > 1 else table
+
+
 def looks_like_daily_report(table):
     """Detect the recurring daily centre report layout."""
     flattened = " ".join(cell.lower() for row in table for cell in row if cell).strip()
@@ -1776,6 +1891,10 @@ def process_image(image_path):
 
         # Step 6: Normalize columns
         table = normalize_columns(table)
+
+        if _looks_like_species_weight_table(table):
+            table = _repair_species_weight_table(table)
+            return table
 
         if looks_like_daily_report(table):
             table = reconstruct_daily_report(table)
