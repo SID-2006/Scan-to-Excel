@@ -264,4 +264,4 @@ Processes the sample backend image and returns extracted data for quick local te
 
 ## License
 
-Add a license here if you plan to open-source or distribute the project.
+MIT License
