@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsm6 \
     libxrender1 \
     libxext6 \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory in the container
