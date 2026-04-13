@@ -36,4 +36,4 @@ RUN mkdir -p uploads outputs
 EXPOSE 5001
 
 # Run the application with Gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--workers", "1", "--preload", "--timeout", "120", "app:app"]
+CMD gunicorn --bind 0.0.0.0:$PORT --workers 1 --preload --timeout 120 app:app
